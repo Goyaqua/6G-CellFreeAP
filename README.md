@@ -1,9 +1,5 @@
 # CENG505: AI-Driven Energy-Efficient Resource Allocation in 6G Cell-Free Networks
 
-**Author:** Burak (Student ID: Your ID)  
-**Course:** CENG505 - Advanced Topics in Computer Engineering  
-**Supervisor:** [Supervisor Name]
-
 ## Project Overview
 
 This project implements Reinforcement Learning (RL) based resource allocation for 6G Cell-Free Massive MIMO networks using NVIDIA Sionna. The goal is to optimize energy efficiency while maintaining Quality of Service (QoS) requirements.
