@@ -398,27 +398,45 @@ class CellFreeEnv(gym.Env):
         ap_association: np.ndarray
     ) -> float:
         """
-        Calculate reward: Energy efficiency with QoS penalty
+        Calculate reward: Logarithmic Energy Efficiency with QoS penalty
 
-        Reward = EE - weight * (number of users not meeting QoS)
+        IMPROVED REWARD SCALING:
+        - EE term: log10(EE) → brings EE from ~1e6-1e9 to ~6-9
+        - QoS penalty: qos_weight × violations → now comparable in magnitude
+        - Power penalty: small penalty for total power consumption
 
-        IMPORTANT: Includes circuit power consumption via ap_association
+        This ensures QoS weight actually matters!
         """
         # Energy efficiency (with circuit power from active APs)
         ee = self.network.calculate_energy_efficiency(rates, power_allocation, ap_association)
         ee_value = ee.numpy()[0]
-        
-        # QoS penalty
+
+        # Logarithmic scaling of EE (brings 1e8 → 8.0)
+        # Add epsilon to prevent log(0)
+        log_ee = np.log10(ee_value + 1e-9)
+
+        # QoS penalty - now meaningful!
         rates_np = rates.numpy()[0]  # (num_users,)
         qos_violations = np.sum(rates_np < self.qos_requirements)
         qos_penalty = self.qos_weight * qos_violations
-        
-        # Total reward
-        reward = ee_value - qos_penalty
-        
-        # Normalize reward (divide by typical EE scale)
-        reward = reward / 1e6
-        
+
+        # Power penalty - small encouragement to save power
+        # Total power = transmit + circuit
+        total_tx_power = np.sum(power_allocation)
+        active_aps = np.sum(np.sum(ap_association, axis=1) > 0)
+        total_circuit_power = active_aps * self.network.circuit_power_per_ap
+        total_power = total_tx_power + total_circuit_power
+
+        # Power penalty coefficient (0.1 means 5W costs 0.5 reward points)
+        power_penalty = 0.1 * total_power
+
+        # Final reward: log_ee (6-9) - qos_penalty (0-500) - power_penalty (0-1)
+        # With new scaling:
+        # - Green (qos_weight=10): penalty 0-100, EE dominates
+        # - Balanced (qos_weight=50): penalty 0-500, balanced
+        # - QoS (qos_weight=100): penalty 0-1000, QoS dominates
+        reward = log_ee - qos_penalty - power_penalty
+
         return reward
     
     def _get_info(self) -> Dict:

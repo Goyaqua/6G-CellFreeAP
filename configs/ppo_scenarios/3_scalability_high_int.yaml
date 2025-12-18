@@ -16,7 +16,7 @@ network:
 
 environment:
   qos_min_rate_mbps: 5.0
-  qos_weight: 50.0               # BALANCED
+  qos_weight: 2.0                # BALANCED: log_EE (~8) vs QoS penalty (~20 max)
   episode_length: 50
   action_type: 'discrete'
   num_power_levels: 5
@@ -33,12 +33,12 @@ training:
   ppo:
     learning_rate: 0.0003
     n_steps: 2048
-    batch_size: 64
+    batch_size: 256       # IMPROVED: More stable gradients
     n_epochs: 10
     gamma: 0.99
     gae_lambda: 0.95
     clip_range: 0.2
-    ent_coef: 0.01
+    ent_coef: 0.03           # IMPROVED: More exploration (fights lazy agent)
     vf_coef: 0.5
     max_grad_norm: 0.5
 
