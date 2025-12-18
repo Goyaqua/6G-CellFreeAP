@@ -1,0 +1,64 @@
+# 🎯 Priority 5: QoS-FOCUSED UPPER BOUND - 36 APs
+# 36 APs (sweet spot), 10 Users, QoS-Focused Reward (high penalty)
+# Scientific Goal: Establish upper bound performance when prioritizing QoS
+# Prove: Maximum achievable rate when RL focuses on performance over energy
+
+network:
+  num_aps: 36                    # SWEET SPOT from baseline analysis
+  num_users: 10
+  num_antennas_per_ap: 1
+  area_size: 500.0
+  carrier_frequency: 3.5e9
+  bandwidth: 10e6
+  max_power_per_ap: 0.2
+  noise_power_dbm: -94
+  circuit_power_per_ap: 0.2
+
+environment:
+  qos_min_rate_mbps: 5.0
+  qos_weight: 100.0              # QoS-FOCUSED: Maximum performance priority
+  episode_length: 50
+  action_type: 'discrete'
+  num_power_levels: 5
+  randomize_circuit_power: true  # CIRCUIT POWER ADAPTIVE
+  circuit_power_range: [0.1, 0.5]
+
+training:
+  total_timesteps: 150000
+  eval_freq: 10000
+  save_freq: 15000
+  n_eval_episodes: 5
+
+  # PPO Configuration
+  ppo:
+    learning_rate: 0.0003
+    n_steps: 2048
+    batch_size: 64
+    n_epochs: 10
+    gamma: 0.99
+    gae_lambda: 0.95
+    clip_range: 0.2
+    ent_coef: 0.01               # Standard exploration
+    vf_coef: 0.5
+    max_grad_norm: 0.5
+
+evaluation:
+  n_episodes: 100
+  baseline_strategies:
+    - 'nearest_max'
+    - 'equal_all'
+    - 'load_balance'
+
+output:
+  results_dir: './results'
+  logs_dir: './logs'
+  plots_dir: './plots'
+  tensorboard_log: './tensorboard'
+  save_models: true
+  save_plots: true
+  verbose: 1
+
+seed:
+  env_seed: 42
+  agent_seed: 42
+  eval_seed: 123
