@@ -269,7 +269,7 @@ def evaluate_baseline(
             ap_association
         )
         
-        ee = network.calculate_energy_efficiency(rates, power_allocation)
+        ee = network.calculate_energy_efficiency(rates, power_allocation, ap_association)
         qos_sat = network.calculate_qos_satisfaction(rates, qos_requirements)
         
         # Store metrics

@@ -34,7 +34,7 @@ class CellFreeEnv(gym.Env):
         qos_min_rate_mbps: float = 5.0,
         qos_weight: float = 10.0,
         episode_length: int = 100,
-        action_type: str = 'discrete',  # 'discrete' or 'continuous'
+        action_type: str = 'discrete',  # 'discrete'
         render_mode: Optional[str] = None,
         randomize_circuit_power: bool = False,  # NEW: Enable circuit power randomization
         circuit_power_range: Optional[Tuple[float, float]] = None  # NEW: Range for randomization
