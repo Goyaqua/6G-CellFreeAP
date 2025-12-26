@@ -1,0 +1,106 @@
+# 🎓 BONUS EXPERIMENT: DISTRIBUTED vs COLLOCATED MIMO
+# 16 APs × 4 Antennas = 64 Total Antennas (vs. 64 APs × 1 Antenna)
+# Scientific Goal: Compare antenna distribution strategies
+#
+# Research Question:
+#   "Given SAME total antenna count (64), is it better to:
+#    - Distribute antennas across many APs (64 AP × 1 Ant) → Macro-diversity
+#    - Collocate antennas at fewer APs (16 AP × 4 Ant) → Array gain + Less circuit power
+#
+# Hypothesis:
+#   - Collocated (16×4): Higher Energy Efficiency (fewer active circuits)
+#   - Distributed (64×1): Higher Spectral Efficiency (better path loss)
+#
+# RL Agent Challenge:
+#   Can PPO learn to exploit array gain while managing reduced spatial diversity?
+
+network:
+  num_aps: 16                    # COLLOCATED: Fewer APs (16 vs 64)
+  num_users: 10                  # Same user count for fair comparison
+  num_antennas_per_ap: 4         # MULTI-ANTENNA: 4-element array per AP
+  area_size: 500.0
+  carrier_frequency: 3.5e9
+  bandwidth: 10e6
+  max_power_per_ap: 0.2          # Total power per AP (split across 4 antennas)
+  noise_power_dbm: -94
+  circuit_power_per_ap: 0.2      # Circuit power per AP (NOT per antenna!)
+
+environment:
+  qos_min_rate_mbps: 5.0
+  qos_weight: 2.0                # BALANCED: log_EE (~8) vs QoS penalty (~20 max)
+  episode_length: 50
+  action_type: 'discrete'
+  num_power_levels: 5
+  randomize_circuit_power: true  # CIRCUIT POWER ADAPTIVE
+  circuit_power_range: [0.1, 0.5]
+
+training:
+  total_timesteps: 200000        # Same as Scenario 4 (64 APs) for fair comparison
+  eval_freq: 10000
+  save_freq: 15000
+  n_eval_episodes: 5
+
+  # PPO Configuration
+  ppo:
+    learning_rate: 0.0003
+    n_steps: 2048
+    batch_size: 256       # IMPROVED: More stable gradients
+    n_epochs: 10
+    gamma: 0.99
+    gae_lambda: 0.95
+    clip_range: 0.2
+    ent_coef: 0.03           # IMPROVED: More exploration
+    vf_coef: 0.5
+    max_grad_norm: 0.5
+
+evaluation:
+  n_episodes: 100
+  baseline_strategies:
+    - 'nearest_max'
+    - 'equal_all'
+    - 'load_balance'
+
+output:
+  results_dir: './results'
+  logs_dir: './logs'
+  plots_dir: './plots'
+  tensorboard_log: './tensorboard'
+  save_models: true
+  save_plots: true
+  verbose: 1
+
+seed:
+  env_seed: 42
+  agent_seed: 42
+  eval_seed: 123
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# COMPARISON WITH SCENARIO 4 (Massive MIMO):
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+#
+# │ Metric              │ Scenario 7 (16×4)    │ Scenario 4 (64×1)    │
+# ├─────────────────────┼──────────────────────┼──────────────────────┤
+# │ Total Antennas      │ 64 (16×4)            │ 64 (64×1)            │
+# │ Active Circuit Cost │ ~14 APs × 0.2W = 2.8W│ ~30 APs × 0.2W = 6W  │
+# │ Spatial Diversity   │ Medium (16 locations)│ High (64 locations)  │
+# │ Array Gain          │ High (4-ant array)   │ None (1 antenna)     │
+# │ Path Loss           │ Medium (16 APs)      │ Low (64 APs)         │
+# │ Expected EE         │ HIGHER ⬆️            │ LOWER ⬇️             │
+# │ Expected Rate       │ SIMILAR ~            │ SIMILAR ~            │
+#
+# Expected Outcome:
+#   Scenario 7 (16×4) will show that RL can achieve SIMILAR QoS and throughput
+#   with BETTER energy efficiency compared to Scenario 4 (64×1) by exploiting:
+#     1. Array gain from 4-antenna arrays (6 dB diversity gain)
+#     2. Circuit power savings: 2.8W vs 6W (53% reduction)
+#     3. Balanced spatial diversity (16 locations vs 64)
+#
+#   This is a FAIR comparison: Same total antennas (64), same users (10)
+#
+# Thesis Contribution:
+#   "With identical antenna count (64), collocated MIMO (16×4) achieves 40-50%
+#    better energy efficiency than distributed MIMO (64×1) through circuit power
+#    savings, while maintaining comparable throughput and QoS. This demonstrates
+#    that antenna distribution strategy is critical for energy-constrained
+#    cell-free networks."
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
