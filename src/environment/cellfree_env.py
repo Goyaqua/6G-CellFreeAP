@@ -206,12 +206,14 @@ class CellFreeEnv(gym.Env):
         info.update({
             'sinr_db': 10 * np.log10(tf.reduce_mean(sinr).numpy()),
             'avg_rate_mbps': tf.reduce_mean(rates).numpy() / 1e6,
+            'user_rates_mbps': (rates.numpy() / 1e6).tolist(),  # Per-user rates in Mbps
             'energy_efficiency': self.network.calculate_energy_efficiency(
                 rates, power_allocation, ap_association
             ).numpy()[0],
             'qos_satisfaction': self.network.calculate_qos_satisfaction(
                 rates, self.qos_requirements
             ).numpy()[0],
+            'qos_violations': int(np.sum(rates.numpy() < self.qos_min_rate)),  # Number of users below QoS
             'active_aps': active_aps_count
         })
         
