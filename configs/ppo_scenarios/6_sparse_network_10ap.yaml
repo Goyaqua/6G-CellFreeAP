@@ -48,6 +48,7 @@ evaluation:
     - 'nearest_max'
     - 'equal_all'
     - 'load_balance'
+    - 'wmmse'
 
 output:
   results_dir: './results'

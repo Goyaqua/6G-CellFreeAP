@@ -1,11 +1,11 @@
-# 🥈 Priority 3: SCALABILITY - HIGH INTERFERENCE
-# 36 APs, 20 Users, Balanced Reward
-# Scientific Goal: Prove scalability - system doesn't collapse when users double
-# Show: 36 APs can handle high user density with RL optimization
+# 🎯 Priority 5: QoS-FOCUSED UPPER BOUND - 36 APs
+# 36 APs (sweet spot), 10 Users, QoS-Focused Reward (high penalty)
+# Scientific Goal: Establish upper bound performance when prioritizing QoS
+# Prove: Maximum achievable rate when RL focuses on performance over energy
 
 network:
-  num_aps: 36                    # SWEET SPOT APs
-  num_users: 20                  # HIGH INTERFERENCE: Double the users
+  num_aps: 36                    # SWEET SPOT from baseline analysis
+  num_users: 10
   num_antennas_per_ap: 1
   area_size: 500.0
   carrier_frequency: 3.5e9
@@ -16,7 +16,7 @@ network:
 
 environment:
   qos_min_rate_mbps: 5.0
-  qos_weight: 2.0                # BALANCED: log_EE (~8) vs QoS penalty (~20 max)
+  qos_weight: 5.0               # QoS-FOCUSED: QoS violations severely penalized
   episode_length: 50
   action_type: 'discrete'
   num_power_levels: 5
@@ -24,9 +24,9 @@ environment:
   circuit_power_range: [0.1, 0.5]
 
 training:
-  total_timesteps: 250000        # More timesteps for complex scenario
+  total_timesteps: 150000
   eval_freq: 10000
-  save_freq: 25000
+  save_freq: 15000
   n_eval_episodes: 5
 
   # PPO Configuration
@@ -48,7 +48,6 @@ evaluation:
     - 'nearest_max'
     - 'equal_all'
     - 'load_balance'
-    - 'wmmse'
 
 output:
   results_dir: './results'

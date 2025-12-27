@@ -216,6 +216,113 @@ class BaselineStrategies:
         
         return power_allocation, ap_association
 
+    @staticmethod
+    def wmmse_power_control(
+        network,
+        channel_matrix: tf.Tensor
+    ) -> Tuple[np.ndarray, np.ndarray]:
+        """
+        Weighted Minimum Mean Square Error (WMMSE) Power Control
+
+        A sophisticated baseline that iteratively optimizes power allocation
+        using MMSE weights. This is a well-known approach from wireless literature.
+
+        Reference: Shi et al., "An Iteratively Weighted MMSE Approach to
+        Distributed Sum-Utility Maximization for a MIMO Interfering Broadcast Channel"
+
+        Args:
+            network: CellFreeNetworkSionna instance
+            channel_matrix: Channel matrix (1, num_users, num_tx)
+
+        Returns:
+            power_allocation: (num_aps,) power in Watts
+            ap_association: (num_aps, num_users) binary matrix
+        """
+        # Get channel gains
+        channel_gain = tf.abs(channel_matrix[0]).numpy()  # (num_users, num_tx)
+
+        # Average channel gain per AP
+        channel_gain_per_ap = np.zeros((network.num_aps, network.num_users))
+        for ap_idx in range(network.num_aps):
+            ant_start = ap_idx * network.num_antennas_per_ap
+            ant_end = (ap_idx + 1) * network.num_antennas_per_ap
+            channel_gain_per_ap[ap_idx] = np.mean(
+                channel_gain[:, ant_start:ant_end],
+                axis=1
+            )
+
+        # Initialize: Top-3 nearest APs for each user (good starting point)
+        ap_association = np.zeros((network.num_aps, network.num_users))
+        for user_idx in range(network.num_users):
+            top_aps = np.argsort(channel_gain_per_ap[:, user_idx])[-3:]
+            ap_association[top_aps, user_idx] = 1
+
+        # Initialize power allocation (equal split)
+        power_allocation = np.ones(network.num_aps) * network.max_power_per_ap * 0.7
+
+        # WMMSE iterations
+        num_iterations = 10
+        noise_power = network.noise_power_linear
+
+        for iteration in range(num_iterations):
+            # Step 1: Compute SINR for each user
+            sinr_values = np.zeros(network.num_users)
+
+            for user_idx in range(network.num_users):
+                # Signal power from serving APs
+                serving_aps = ap_association[:, user_idx] > 0
+                signal_power = np.sum(
+                    channel_gain_per_ap[serving_aps, user_idx] *
+                    power_allocation[serving_aps]
+                )
+
+                # Interference from all APs
+                total_power = np.sum(
+                    channel_gain_per_ap[:, user_idx] * power_allocation
+                )
+                interference_power = total_power - signal_power
+
+                # SINR
+                sinr_values[user_idx] = signal_power / (interference_power + noise_power + 1e-12)
+
+            # Step 2: Update MMSE weights (inverse of SINR + 1)
+            weights = 1.0 / (1.0 + sinr_values + 1e-12)
+
+            # Step 3: Water-filling power allocation
+            # Simplified: Allocate more power to users with higher weights (worse SINR)
+            for ap_idx in range(network.num_aps):
+                # Find users served by this AP
+                served_users = ap_association[ap_idx] > 0
+
+                if not served_users.any():
+                    power_allocation[ap_idx] = 0.0
+                    continue
+
+                # Average weight of served users
+                avg_weight = np.mean(weights[served_users])
+
+                # Allocate power based on:
+                # 1. Channel quality (how strong is the link?)
+                # 2. User weights (how much does this user need power?)
+                avg_channel = np.mean(channel_gain_per_ap[ap_idx, served_users])
+
+                # Water-filling-like update
+                power_factor = avg_weight * avg_channel
+
+                # Normalize and scale
+                power_allocation[ap_idx] = min(
+                    power_factor * network.max_power_per_ap,
+                    network.max_power_per_ap
+                )
+
+            # Normalize total power to not exceed budget
+            total_power = np.sum(power_allocation)
+            max_total_power = network.num_aps * network.max_power_per_ap * 0.8
+            if total_power > max_total_power:
+                power_allocation = power_allocation * (max_total_power / total_power)
+
+        return power_allocation, ap_association
+
 
 def evaluate_baseline(
     network,
@@ -238,7 +345,8 @@ def evaluate_baseline(
         'random': BaselineStrategies.random_allocation,
         'equal_all': BaselineStrategies.equal_power_all_serve,
         'distance': BaselineStrategies.distance_based_power,
-        'load_balance': BaselineStrategies.load_balancing
+        'load_balance': BaselineStrategies.load_balancing,
+        'wmmse': BaselineStrategies.wmmse_power_control
     }
     
     if strategy_name not in strategy_map:

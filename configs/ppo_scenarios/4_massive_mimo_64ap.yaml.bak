@@ -1,11 +1,11 @@
-# 🥈 Priority 3: SCALABILITY - HIGH INTERFERENCE
-# 36 APs, 20 Users, Balanced Reward
-# Scientific Goal: Prove scalability - system doesn't collapse when users double
-# Show: 36 APs can handle high user density with RL optimization
+# 🥉 Priority 4: MASSIVE MIMO GENERALIZATION - 64 APs
+# 64 APs, 10 Users, Balanced Reward (can switch to Green if needed)
+# Scientific Goal: Show RL can shut down unnecessary APs in massive deployments
+# Prove: RL corrects the inefficiency seen in 64 AP baseline graphs
 
 network:
-  num_aps: 36                    # SWEET SPOT APs
-  num_users: 20                  # HIGH INTERFERENCE: Double the users
+  num_aps: 64                    # MASSIVE: Many APs available
+  num_users: 10
   num_antennas_per_ap: 1
   area_size: 500.0
   carrier_frequency: 3.5e9
@@ -24,9 +24,9 @@ environment:
   circuit_power_range: [0.1, 0.5]
 
 training:
-  total_timesteps: 250000        # More timesteps for complex scenario
+  total_timesteps: 200000        # Many APs = complex action space
   eval_freq: 10000
-  save_freq: 25000
+  save_freq: 20000
   n_eval_episodes: 5
 
   # PPO Configuration
@@ -38,7 +38,7 @@ training:
     gamma: 0.99
     gae_lambda: 0.95
     clip_range: 0.2
-    ent_coef: 0.03           # IMPROVED: More exploration (fights lazy agent)
+    ent_coef: 0.05           # IMPROVED: Even more exploration for 64 APs!
     vf_coef: 0.5
     max_grad_norm: 0.5
 

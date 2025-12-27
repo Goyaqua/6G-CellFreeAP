@@ -1,11 +1,11 @@
-# 🥈 Priority 3: SCALABILITY - HIGH INTERFERENCE
-# 36 APs, 20 Users, Balanced Reward
-# Scientific Goal: Prove scalability - system doesn't collapse when users double
-# Show: 36 APs can handle high user density with RL optimization
+# 🛡️ Priority 6: SPARSE NETWORK ROBUSTNESS - 10 APs
+# 10 APs, 5 Users, Balanced Reward
+# Scientific Goal: Test RL robustness in resource-limited scenarios
+# Prove: RL adapts to sparse deployments, doesn't overfit to dense networks
 
 network:
-  num_aps: 36                    # SWEET SPOT APs
-  num_users: 20                  # HIGH INTERFERENCE: Double the users
+  num_aps: 10                    # SPARSE: Limited AP resources
+  num_users: 5                   # Proportionally fewer users
   num_antennas_per_ap: 1
   area_size: 500.0
   carrier_frequency: 3.5e9
@@ -24,9 +24,9 @@ environment:
   circuit_power_range: [0.1, 0.5]
 
 training:
-  total_timesteps: 250000        # More timesteps for complex scenario
+  total_timesteps: 100000        # Smaller action space, fewer steps needed
   eval_freq: 10000
-  save_freq: 25000
+  save_freq: 10000
   n_eval_episodes: 5
 
   # PPO Configuration
@@ -48,7 +48,6 @@ evaluation:
     - 'nearest_max'
     - 'equal_all'
     - 'load_balance'
-    - 'wmmse'
 
 output:
   results_dir: './results'
