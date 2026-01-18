@@ -1,0 +1,84 @@
+# Scenario 9: Low Load - Green Computing
+# 36 APs, 5 Users - Ultra Low Load
+# Scientific Goal: Demonstrate intelligent AP sleep mode when users are sparse
+# Hypothesis: Agent should activate only 10-20% of APs (6-8 out of 36)
+# Key Insight: "Don't waste energy on idle infrastructure"
+
+network:
+  num_aps: 36                      # Many APs available
+  num_users: 5                     # Very few users (Low Load: 0.14 users/AP)
+  num_antennas_per_ap: 1
+  area_size: 500.0
+  carrier_frequency: 3.5e9
+  bandwidth: 10e6
+  max_power_per_ap: 0.2
+  noise_power_dbm: -94
+  circuit_power_per_ap: 0.2        # 200mW per AP (significant cost if all active)
+
+environment:
+  qos_min_rate_mbps: 5.0           # Standard QoS requirement
+  qos_weight: 2.0                  # Balanced reward (not too aggressive)
+  rate_weight: 0.5                 # Rate less important (only 5 users)
+  power_penalty_weight: 2.0        # Sleep mode optimization priority
+  fairness_weight: 0.0             # Only 5 users, fairness automatic
+  episode_length: 50
+  action_type: 'discrete'
+  num_power_levels: 5
+  randomize_circuit_power: true    # Test adaptability
+  circuit_power_range: [0.1, 0.5]  # 100mW - 500mW
+
+training:
+  total_timesteps: 150000          # Moderate training (simpler scenario)
+  eval_freq: 10000
+  save_freq: 25000
+  n_eval_episodes: 5
+
+  # PPO Configuration
+  ppo:
+    learning_rate: 0.0003
+    n_steps: 2048
+    batch_size: 256
+    n_epochs: 10
+    gamma: 0.99
+    gae_lambda: 0.95
+    clip_range: 0.2
+    ent_coef: 0.01
+    vf_coef: 0.5
+    max_grad_norm: 0.5
+
+evaluation:
+  n_episodes: 50
+  baseline_strategies:
+    - 'nearest_max'                # Will use ~5 APs (100% efficient)
+    - 'equal_all'                  # Will use all 36 APs (wasteful!)
+    - 'load_balance'               # Will use ~10-15 APs
+    - 'wmmse'                      # Sophisticated baseline
+
+output:
+  results_dir: './results'
+  logs_dir: './logs'
+  plots_dir: './plots'
+  tensorboard_log: './tensorboard'
+  save_models: true
+  save_plots: true
+  verbose: 1
+
+seed:
+  env_seed: 42
+  agent_seed: 42
+  eval_seed: 2024
+
+# Expected Agent Behavior:
+# - Activate only 6-8 APs (17-22% utilization)
+# - Prioritize "Nearest-Only" or "Top-3" clustering strategies
+# - Use "Low" or "Medium" power levels
+# - Put 28-30 APs into sleep mode to save circuit power
+#
+# Baseline Comparison:
+# - Nearest Max: Will activate ~5 APs (optimal for this load)
+# - Equal Power All: Will waste energy on 36 APs (7x more circuit power!)
+# - Agent should match Nearest Max efficiency or beat it
+#
+# Key Learning:
+# "When the house is empty, turn off the lights!"
+# Circuit power dominates in low-load scenarios → Sleep mode is critical

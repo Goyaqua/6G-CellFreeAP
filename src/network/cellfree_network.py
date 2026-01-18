@@ -1,5 +1,6 @@
 """
 Cell-Free Network Simulation using Sionna
+Physical Layer Modeling and Performance Metrics
 """
 
 import tensorflow as tf
@@ -75,10 +76,12 @@ class CellFreeNetworkSionna:
         self._setup_channel()
         
         # Convert noise power to linear scale (Watts)
+        # dbm is logarithmic scale:
+        # Thus, noise_power_linear = 10^(noise_power_dbm/10) / 1000
         self.noise_power_linear = 10**(self.noise_power_dbm / 10) / 1000
         
     def _deploy_aps(self) -> np.ndarray:
-        """Deploy APs in a regular grid pattern"""
+        """Deploy APs in a regular GRID pattern"""
         side_length = int(np.ceil(np.sqrt(self.num_aps)))
         spacing = self.area_size / (side_length + 1)
         
@@ -102,7 +105,7 @@ class CellFreeNetworkSionna:
         return np.random.uniform(0, self.area_size, (self.num_users, 2))
     
     def _calculate_distances(self) -> np.ndarray:
-        """Calculate distance matrix between all APs and users"""
+        """Calculate distance matrix between all APs and users by euclidean distance"""
         distances = np.zeros((self.num_aps, self.num_users))
         for i in range(self.num_aps):
             for j in range(self.num_users):
@@ -121,7 +124,7 @@ class CellFreeNetworkSionna:
             num_tx_ant=1
         )
         
-        # AWGN channel
+        # AWGN channel for noise modeling
         self.awgn = AWGN()
     
     @tf.function(experimental_relax_shapes=True)

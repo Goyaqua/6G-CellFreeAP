@@ -76,6 +76,11 @@ class CellFreeEnv(gym.Env):
             self.episode_length = config['environment']['episode_length']
             self.action_type = config['environment']['action_type']
 
+            # Unified reward weights
+            self.rate_weight = config['environment'].get('rate_weight', 1.0)
+            self.power_penalty_weight = config['environment'].get('power_penalty_weight', 1.0)
+            self.fairness_weight = config['environment'].get('fairness_weight', 0.0)
+
             # Override with config if available
             if 'randomize_circuit_power' in config['environment']:
                 self.randomize_circuit_power = config['environment']['randomize_circuit_power']
@@ -88,6 +93,11 @@ class CellFreeEnv(gym.Env):
             self.qos_weight = qos_weight
             self.episode_length = episode_length
             self.action_type = action_type
+
+            # Unified reward weights (defaults)
+            self.rate_weight = 1.0
+            self.power_penalty_weight = 1.0
+            self.fairness_weight = 0.0
         
         # Create network
         # Load circuit power from config if available
@@ -400,44 +410,59 @@ class CellFreeEnv(gym.Env):
         ap_association: np.ndarray
     ) -> float:
         """
-        Calculate reward: Logarithmic Energy Efficiency with QoS penalty
+        Calculate unified reward function for all scenarios
 
-        IMPROVED REWARD SCALING:
-        - EE term: log10(EE) → brings EE from ~1e6-1e9 to ~6-9
-        - QoS penalty: qos_weight × violations → now comparable in magnitude
-        - Power penalty: small penalty for total power consumption
+        Reward = α×log_sum_rate - β×normalized_power - γ×qos_penalty - δ×fairness_penalty
 
-        This ensures QoS weight actually matters!
+        Components:
+        - log_sum_rate: Proportional fairness (magnitude ~20-50)
+        - normalized_power: Power cost in [0, 1] range
+        - qos_penalty: QoS violations penalty
+        - fairness_penalty: Jain's Index based fairness (0 = fair, 1 = unfair)
+
+        Weights (α, β, γ, δ) are scenario-specific from YAML config
         """
-        # Energy efficiency (with circuit power from active APs)
-        ee = self.network.calculate_energy_efficiency(rates, power_allocation, ap_association)
-        ee_value = ee.numpy()[0]
+        # Extract rates as numpy array
+        rates_np = rates.numpy()[0]  # Shape: (num_users,)
+        user_rates_mbps = rates_np / 1e6  # Convert bps to Mbps
 
-        # Logarithmic scaling of EE (brings 1e8 → 8.0)
-        # Add epsilon to prevent log(0)
-        log_ee = np.log10(ee_value + 1e-9)
+        # 1. Log Sum-Rate (Proportional Fairness)
+        # log1p(x) = log(1 + x) → avoids log(0) issues
+        log_sum_rate = np.sum(np.log1p(user_rates_mbps))
 
-        # QoS penalty - now meaningful!
-        rates_np = rates.numpy()[0]  # (num_users,)
-        qos_violations = np.sum(rates_np < self.qos_requirements)
-        qos_penalty = self.qos_weight * qos_violations
+        # 2. QoS Penalty
+        qos_violations = np.maximum(0, self.qos_min_rate / 1e6 - user_rates_mbps)
+        qos_penalty = self.qos_weight * np.sum(qos_violations)
 
-        # Power penalty - small encouragement to save power
-        # Total power = transmit + circuit
+        # 3. Normalized Power Cost
         total_tx_power = np.sum(power_allocation)
         active_aps = np.sum(np.sum(ap_association, axis=1) > 0)
         total_circuit_power = active_aps * self.network.circuit_power_per_ap
         total_power = total_tx_power + total_circuit_power
 
-        # Power penalty coefficient (0.1 means 5W costs 0.5 reward points)
-        power_penalty = 0.1 * total_power
+        max_possible_power = self.num_aps * (
+            self.network.max_power_per_ap + self.network.circuit_power_per_ap
+        )
+        normalized_power = total_power / max_possible_power
 
-        # Final reward: log_ee (6-9) - qos_penalty (0-500) - power_penalty (0-1)
-        # With new scaling:
-        # - Green (qos_weight=10): penalty 0-100, EE dominates
-        # - Balanced (qos_weight=50): penalty 0-500, balanced
-        # - QoS (qos_weight=100): penalty 0-1000, QoS dominates
-        reward = log_ee - qos_penalty - power_penalty
+        # 4. Fairness Penalty (Jain's Index)
+        sum_rates = np.sum(user_rates_mbps)
+        sum_rates_squared = np.sum(user_rates_mbps ** 2)
+
+        if sum_rates_squared > 1e-9:  # Avoid division by zero
+            jains_index = (sum_rates ** 2) / (self.num_users * sum_rates_squared)
+        else:
+            jains_index = 0.0
+
+        fairness_penalty = self.fairness_weight * (1.0 - jains_index)
+
+        # Final Reward (Configurable Weights)
+        reward = (
+            self.rate_weight * log_sum_rate
+            - self.power_penalty_weight * normalized_power
+            - qos_penalty
+            - fairness_penalty
+        )
 
         return reward
     

@@ -16,11 +16,14 @@ network:
 
 environment:
   qos_min_rate_mbps: 5.0
-  qos_weight: 5.0               # QoS-FOCUSED: QoS violations severely penalized
+  qos_weight: 5.0                  # QoS-FOCUSED: QoS violations severely penalized
+  rate_weight: 1.5                 # Rate maximization priority
+  power_penalty_weight: 0.5        # Power less critical
+  fairness_weight: 0.0             # No fairness penalty needed
   episode_length: 50
   action_type: 'discrete'
   num_power_levels: 5
-  randomize_circuit_power: true  # CIRCUIT POWER ADAPTIVE
+  randomize_circuit_power: true    # CIRCUIT POWER ADAPTIVE
   circuit_power_range: [0.1, 0.5]
 
 training:

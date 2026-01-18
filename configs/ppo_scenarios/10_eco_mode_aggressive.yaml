@@ -1,0 +1,89 @@
+# Scenario 10: Eco Mode - Aggressive Power Saving
+# 36 APs, 10 Users - Same as Scenario 1 but with aggressive power penalty
+# Scientific Goal: Test how power penalty affects agent behavior
+# Hypothesis: Agent should prioritize power saving over rate maximization
+# Expected: Lower rates, much lower power, higher EE
+
+network:
+  num_aps: 36                      # Same as Scenario 1
+  num_users: 10                    # Same as Scenario 1
+  num_antennas_per_ap: 1
+  area_size: 500.0
+  carrier_frequency: 3.5e9
+  bandwidth: 10e6
+  max_power_per_ap: 0.2
+  noise_power_dbm: -94
+  circuit_power_per_ap: 0.2
+
+environment:
+  qos_min_rate_mbps: 5.0           # Standard QoS (must satisfy)
+  qos_weight: 2.0                  # Standard QoS penalty
+  rate_weight: 0.5                 # Rate less important (Eco Mode)
+  power_penalty_weight: 3.0        # ECO MODE: Aggressive power saving
+  fairness_weight: 0.0             # No fairness penalty needed
+  episode_length: 50
+  action_type: 'discrete'
+  num_power_levels: 5
+  randomize_circuit_power: true
+  circuit_power_range: [0.1, 0.5]
+
+training:
+  total_timesteps: 200000
+  eval_freq: 10000
+  save_freq: 25000
+  n_eval_episodes: 5
+
+  # PPO Configuration
+  ppo:
+    learning_rate: 0.0003
+    n_steps: 2048
+    batch_size: 256
+    n_epochs: 10
+    gamma: 0.99
+    gae_lambda: 0.95
+    clip_range: 0.2
+    ent_coef: 0.01
+    vf_coef: 0.5
+    max_grad_norm: 0.5
+
+evaluation:
+  n_episodes: 50
+  baseline_strategies:
+    - 'nearest_max'
+    - 'equal_all'
+    - 'load_balance'
+    - 'wmmse'
+
+output:
+  results_dir: './results'
+  logs_dir: './logs'
+  plots_dir: './plots'
+  tensorboard_log: './tensorboard'
+  save_models: true
+  save_plots: true
+  verbose: 1
+
+seed:
+  env_seed: 42
+  agent_seed: 42
+  eval_seed: 2024
+
+# Expected Agent Behavior (compared to Scenario 1):
+# - Scenario 1 (power_weight=0.1): ~10 active APs, 35 Mbps rate
+# - Scenario 10 (power_weight=0.3): ~6-8 active APs, 20-25 Mbps rate
+#
+# Reward Formula:
+# reward = log10(EE) - qos_weight × violations - power_penalty_weight × total_power
+#        = ~8       - 2 × 0                   - 0.3 × 5W
+#        = 8        - 0                       - 1.5
+#        = 6.5
+#
+# Comparison:
+# Normal Mode: power_penalty = 0.1 × 5W = 0.5 → reward = 7.5
+# Eco Mode:    power_penalty = 0.3 × 5W = 1.5 → reward = 6.5
+#
+# Agent learns: "Power is expensive! Use fewer APs, lower power levels"
+#
+# Key Insight:
+# "Eco Mode = Pay 3× more for every Watt consumed"
+# Agent adapts by aggressive AP sleep + low power transmission

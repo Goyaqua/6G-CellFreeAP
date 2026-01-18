@@ -1,11 +1,7 @@
-# 🛡️ Priority 6: SPARSE NETWORK ROBUSTNESS - 10 APs
-# 10 APs, 5 Users, Balanced Reward
-# Scientific Goal: Test RL robustness in resource-limited scenarios
-# Prove: RL adapts to sparse deployments, doesn't overfit to dense networks
 
 network:
-  num_aps: 10                    # SPARSE: Limited AP resources
-  num_users: 5                   # Proportionally fewer users
+  num_aps: 64                    
+  num_users: 264                  # CROWD: High user density scenario
   num_antennas_per_ap: 1
   area_size: 500.0
   carrier_frequency: 3.5e9
@@ -16,10 +12,10 @@ network:
 
 environment:
   qos_min_rate_mbps: 5.0
-  qos_weight: 2.0                  # Standard
-  rate_weight: 1.0                 # Unified Reward
-  power_penalty_weight: 1.5        # Focus on efficiency
-  fairness_weight: 0.0             # Simple, no fairness needed
+  qos_weight: 10.0                 # CRITICAL: 264 users → QoS dominant
+  rate_weight: 1.0                 # Unified Reward: log sum-rate importance
+  power_penalty_weight: 0.5        # Power less critical (user satisfaction priority)
+  fairness_weight: 2.0             # CRITICAL: Fairness essential for 264 users
   episode_length: 50
   action_type: 'discrete'
   num_power_levels: 5
@@ -27,9 +23,9 @@ environment:
   circuit_power_range: [0.1, 0.5]
 
 training:
-  total_timesteps: 100000        # Smaller action space, fewer steps needed
+  total_timesteps: 200000        # Higher for main model
   eval_freq: 10000
-  save_freq: 10000
+  save_freq: 20000
   n_eval_episodes: 5
 
   # PPO Configuration
