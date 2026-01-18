@@ -1,157 +1,146 @@
-# CENG505: AI-Driven Energy-Efficient Resource Allocation in 6G Cell-Free Networks
+# AI-Driven Energy-Efficient Resource Allocation in 6G Cell-Free Networks
 
-## Project Overview
+Deep Reinforcement Learning (PPO) framework for energy-efficient power control in Cell-Free Massive MIMO systems using NVIDIA Sionna.
 
-This project implements Reinforcement Learning (RL) based resource allocation for 6G Cell-Free Massive MIMO networks using NVIDIA Sionna. The goal is to optimize energy efficiency while maintaining Quality of Service (QoS) requirements.
+## Overview
 
-## Features
+This project implements a **unified, scalable reward function** for Cell-Free network resource allocation that adapts to diverse topologies (10-64 APs, 5-264 users) through configurable weights. The agent learns to maximize energy efficiency while maintaining strict QoS requirements.
 
-- **Realistic Channel Modeling**: Using Sionna's advanced channel models
-- **RL-based Optimization**: Deep Q-Network (DQN) and PPO agents
-- **Baseline Comparisons**: Nearest-AP, Max-Power, Random strategies
-- **Performance Metrics**: Energy Efficiency, SINR, Data Rate, QoS satisfaction
+## Key Features
+
+- **Unified Reward Function**: Multi-objective optimization (throughput, power, QoS, fairness)
+- **Topology-Agnostic**: Single framework adapts to 11 diverse scenarios
+- **Realistic Physical Layer**: NVIDIA Sionna simulation (Rayleigh fading, path loss, SINR)
+- **Surgical Power Control**: Agent learns deep sleep mode for redundant APs
+- **PPO Agent**: Proximal Policy Optimization with Actor-Critic architecture
+- **Baseline Comparisons**: EPA, Nearest-AP, Load Balance, WMMSE
+
+## Quick Start
+
+### Installation
+
+```bash
+# Clone repository
+git clone [your-repo-url]
+cd ceng505_cellfree_rl
+
+# Create virtual environment
+python -m venv venv
+source venv/bin/activate  # Windows: venv\Scripts\activate
+
+# Install dependencies
+pip install -r requirements.txt
+```
+
+### Train Single Scenario
+
+```bash
+# Train Sweet Spot scenario (36 APs, 10 users)
+python src/train_agent.py \
+  --config configs/ppo_scenarios/1_sweet_spot_balanced.yaml \
+  --agent ppo
+```
+
+### Run All Experiments
+
+```bash
+# Train all 11 scenarios + analysis (6-12 hours)
+bash run_all_experiments.sh
+
+# Monitor progress
+tail -f pipeline_output.log
+```
+
+### Evaluate Trained Model
+
+```bash
+# Network performance analysis
+python src/analyze_network.py --mode evaluate \
+  --model experiments/exp_*/models/ppo_cellfree_final \
+  --episodes 100 --num-aps 36 --num-users 10
+
+# Behavior analysis
+python src/analyze_behavior.py \
+  --model experiments/exp_*/models/ppo_cellfree_final \
+  --config configs/ppo_scenarios/1_sweet_spot_balanced.yaml \
+  --episodes 100
+```
 
 ## Project Structure
 
 ```
 ceng505_cellfree_rl/
 ├── src/
-│   ├── network/          # Network simulation classes
-│   ├── environment/      # Gymnasium RL environment
-│   ├── agents/           # RL agent implementations
-│   └── utils/            # Helper functions
-├── configs/              # Configuration files
-├── results/              # Simulation results
-├── logs/                 # Training logs
-├── notebooks/            # Jupyter notebooks for analysis
-├── requirements.txt      # Python dependencies
-└── README.md            # This file
+│   ├── network/           # Sionna-based physical layer simulation
+│   │   └── cellfree_network.py  # SINR, channel model, power consumption
+│   ├── environment/       # Gymnasium RL environment
+│   │   └── cellfree_env.py      # Unified reward function
+│   ├── agents/            # Baseline heuristics (EPA, Nearest, WMMSE)
+│   ├── train_agent.py     # PPO training script
+│   ├── analyze_network.py # Performance evaluation
+│   └── analyze_behavior.py# Action distribution analysis
+├── configs/
+│   └── ppo_scenarios/     # 11 scenario configurations
+├── run_all_experiments.sh # Automated pipeline
+└── RUN_EXPERIMENTS_README.md  # Detailed pipeline documentation
 ```
 
-## Installation
+## Unified Reward Function
 
-### Prerequisites
-- Python 3.12+
-- CUDA-capable GPU (recommended)
-- 8GB+ RAM
-
-### Setup
-
-1. Clone or download this project:
-```bash
-cd ceng505_cellfree_rl
+```
+reward = α × log_sum_rate - β × normalized_power - γ × qos_penalty - δ × fairness_penalty
 ```
 
-2. Create virtual environment:
-```bash
-python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
-```
+### Scenario Weights
 
-3. Install dependencies:
-```bash
-pip install -r requirements.txt
-```
+| Scenario | APs | Users | α (rate) | β (power) | γ (QoS) | δ (fairness) |
+|----------|-----|-------|----------|-----------|---------|--------------|
+| 1. Sweet Spot | 36 | 10 | 1.0 | 1.0 | 2.0 | 0.0 |
+| 3. High Interference | 36 | 20 | 1.0 | 0.8 | 3.0 | 1.5 |
+| 8. Crowded | 64 | 264 | 1.0 | 0.5 | 10.0 | 2.0 |
+| 9. Low Load Green | 36 | 5 | 0.5 | 2.0 | 2.0 | 0.0 |
+| 10. Eco Mode | 36 | 10 | 0.5 | 3.0 | 2.0 | 0.0 |
+| 11. Performance Mode | 36 | 10 | 1.5 | 0.3 | 2.0 | 0.0 |
 
-## Quick Start
-
-### 1. Run Baseline Simulations
-```bash
-python src/run_baseline.py --config configs/default.yaml
-```
-
-### 2. Train RL Agent
-```bash
-python src/train_agent.py --agent dqn --episodes 1000
-```
-
-### 3. Evaluate Performance
-```bash
-python src/evaluate.py --model results/dqn_model.zip
-```
-
-### 4. Visualize Results
-```bash
-python src/visualize_results.py --results results/comparison.npz
-```
-
-## Configuration
-
-Edit `configs/default.yaml` to change:
-- Network parameters (number of APs, users)
-- RL hyperparameters
-- Channel model settings
-- Training parameters
+See [RUN_EXPERIMENTS_README.md](RUN_EXPERIMENTS_README.md) for all 11 scenarios.
 
 ## Results
 
-Results will be saved in:
-- `results/`: Model checkpoints and performance data
-- `logs/`: TensorBoard logs for training visualization
-- `notebooks/`: Analysis and visualization notebooks
+### Energy Efficiency Gains
 
-## Usage Examples
+PPO agent achieves **8-69x** energy efficiency improvement over Equal Power Allocation (EPA):
 
-### Example 1: Custom Network Configuration
-```python
-from src.network.cellfree_network import CellFreeNetworkSionna
+- **Sweet Spot**: 76.8 Mbit/J (+716% vs EPA)
+- **Crowded (264 users)**: 391 Mbit/J (+6820% vs EPA)
+- **Eco Mode**: 83.1 Mbit/J (+783% vs EPA)
 
-network = CellFreeNetworkSionna(
-    num_aps=25,
-    num_users=10,
-    num_antennas_per_ap=4,
-    area_size=500
-)
-```
+### Key Insights
 
-### Example 2: Train Custom Agent
-```python
-from src.agents.dqn_agent import DQNAgent
-from src.environment.cellfree_env import CellFreeEnv
+1. **Surgical Power Control**: Agent activates only ~9 APs in crowded scenario (86% reduction from 64 APs)
+2. **Denominator Effect**: Massive EE gains stem from eliminating circuit power (>80% of total consumption)
+3. **100% QoS Satisfaction**: All users maintain >5 Mbps across all scenarios
+4. **Topology Adaptation**: Same reward framework works for 10-64 APs, 5-264 users
 
-env = CellFreeEnv(config='configs/default.yaml')
-agent = DQNAgent(env)
-agent.train(episodes=1000)
-```
+## System Model
 
-## Methodology
+- **Downlink Cell-Free Massive MIMO**
+- **Non-coherent Joint Transmission** (power domain combining)
+- **Channel Model**: Rayleigh fading + path loss
+- **SINR Formula**: γ_k = Σ(m∈M_k) P_m|g_mk|² / (interference + noise)
+- **Power Consumption**: P_total = Σ P_m + P_circ × N_active
+- **Deep Sleep**: Inactive APs consume zero power
 
-### Phase 1: Network Modeling
-- Cell-free network topology
-- Sionna channel models (path loss, shadowing, fading)
-- SINR and rate calculations
+## Action Space (20 discrete actions)
 
-### Phase 2: RL Strategy
-- State: Channel gains, user QoS requirements
-- Action: Power allocation, AP-user association
-- Reward: Energy efficiency with QoS penalty
-
-### Phase 3: Evaluation
-- Compare against baselines
-- Analyze convergence
-- Measure adaptability
+- **Power Levels**: {0, 0.25, 0.5, 0.75, 1.0}
+- **Clustering**: {Nearest-Only, Top-3, Top-50%, All-Active}
+- **Total**: 5 × 4 = 20 actions
 
 ## Performance Metrics
 
-1. **Energy Efficiency (EE)**: bits/Joule
-2. **Average Data Rate**: Mbps per user
-3. **QoS Satisfaction Rate**: % of users meeting requirements
-4. **SINR**: Signal-to-Interference-plus-Noise Ratio
+1. **Spectral Efficiency**: Sum-Rate (Mbps)
+2. **Energy Efficiency**: Sum-Rate / Total Power (Mbit/J)
+3. **QoS Satisfaction**: % of users ≥ 5 Mbps
+4. **Fairness**: Jain's Index
+5. **Active APs**: Sleep mode efficiency
 
-## References
-
-See `docs/references.bib` for full bibliography.
-
-## License
-
-MIT License - Academic use only
-
-## Contact
-
-For questions or issues, contact: [your email]
-
-## Acknowledgments
-
-- NVIDIA Sionna team for the wireless simulation framework
-- OpenAI Gymnasium for RL environment standards
-- Stable-Baselines3 for RL implementations
