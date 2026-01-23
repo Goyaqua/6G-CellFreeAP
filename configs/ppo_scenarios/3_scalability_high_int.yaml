@@ -16,10 +16,10 @@ network:
 
 environment:
   qos_min_rate_mbps: 5.0
-  qos_weight: 3.0                  # High QoS importance (20 users, high interference)
-  rate_weight: 1.0                 # Unified Reward: log sum-rate importance
-  power_penalty_weight: 0.8        # Slightly relaxed power penalty
-  fairness_weight: 1.5             # Fairness critical! (20 users)
+  qos_weight: 5.0                  # High QoS importance (20 users, magnitude-balanced)
+  rate_weight: 0.1                 # Unified Reward: scaled for 20 users (~40 magnitude)
+  power_penalty_weight: 3.0        # Power penalty scaled up for balance
+  fairness_weight: 10.0            # Fairness critical! (20 users, scaled up)
   episode_length: 50
   action_type: 'discrete'
   num_power_levels: 5

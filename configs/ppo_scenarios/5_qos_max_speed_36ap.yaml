@@ -16,9 +16,9 @@ network:
 
 environment:
   qos_min_rate_mbps: 5.0
-  qos_weight: 5.0                  # QoS-FOCUSED: QoS violations severely penalized
-  rate_weight: 1.5                 # Rate maximization priority
-  power_penalty_weight: 0.5        # Power less critical
+  qos_weight: 10.0                 # QoS-FOCUSED: QoS violations severely penalized
+  rate_weight: 0.2                 # Rate maximization priority (scaled up vs others)
+  power_penalty_weight: 1.0        # Power less critical (but still balanced)
   fairness_weight: 0.0             # No fairness penalty needed
   episode_length: 50
   action_type: 'discrete'

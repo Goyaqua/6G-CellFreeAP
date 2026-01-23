@@ -12,10 +12,10 @@ network:
 
 environment:
   qos_min_rate_mbps: 5.0
-  qos_weight: 10.0                 # CRITICAL: 264 users → QoS dominant
-  rate_weight: 1.0                 # Unified Reward: log sum-rate importance
-  power_penalty_weight: 0.5        # Power less critical (user satisfaction priority)
-  fairness_weight: 2.0             # CRITICAL: Fairness essential for 264 users
+  qos_weight: 10.0                 # CRITICAL: 264 users → QoS dominant (magnitude OK)
+  rate_weight: 0.05                # Unified Reward: scaled for 264 users (~183 magnitude)
+  power_penalty_weight: 5.0        # Power important (64 APs, scaled up for balance)
+  fairness_weight: 10.0            # CRITICAL: Fairness essential for 264 users (scaled up)
   episode_length: 50
   action_type: 'discrete'
   num_power_levels: 5

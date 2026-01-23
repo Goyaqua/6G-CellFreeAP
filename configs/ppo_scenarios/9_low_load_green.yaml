@@ -17,9 +17,9 @@ network:
 
 environment:
   qos_min_rate_mbps: 5.0           # Standard QoS requirement
-  qos_weight: 2.0                  # Balanced reward (not too aggressive)
-  rate_weight: 0.5                 # Rate less important (only 5 users)
-  power_penalty_weight: 2.0        # Sleep mode optimization priority
+  qos_weight: 5.0                  # Magnitude-balanced
+  rate_weight: 0.1                 # Rate less important (5 users, ~18 magnitude)
+  power_penalty_weight: 5.0        # Sleep mode optimization priority (scaled up)
   fairness_weight: 0.0             # Only 5 users, fairness automatic
   episode_length: 50
   action_type: 'discrete'

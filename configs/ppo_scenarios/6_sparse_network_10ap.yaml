@@ -16,10 +16,10 @@ network:
 
 environment:
   qos_min_rate_mbps: 5.0
-  qos_weight: 2.0                  # Standard
-  rate_weight: 1.0                 # Unified Reward
-  power_penalty_weight: 1.5        # Focus on efficiency
-  fairness_weight: 0.0             # Simple, no fairness needed
+  qos_weight: 5.0                  # Magnitude-balanced
+  rate_weight: 0.15                # Unified Reward (slightly higher for sparse, 5 users)
+  power_penalty_weight: 3.0        # Focus on efficiency (scaled up)
+  fairness_weight: 0.0             # Simple, no fairness needed (5 users)
   episode_length: 50
   action_type: 'discrete'
   num_power_levels: 5

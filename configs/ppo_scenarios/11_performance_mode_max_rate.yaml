@@ -17,9 +17,9 @@ network:
 
 environment:
   qos_min_rate_mbps: 5.0           # Standard QoS (must satisfy)
-  qos_weight: 2.0                  # Standard QoS penalty
-  rate_weight: 1.5                 # PERFORMANCE MODE: Throughput maximization
-  power_penalty_weight: 0.3        # Power less critical
+  qos_weight: 5.0                  # Magnitude-balanced QoS penalty
+  rate_weight: 0.2                 # PERFORMANCE MODE: Throughput maximization (2x vs others)
+  power_penalty_weight: 1.0        # Power less critical (but still balanced)
   fairness_weight: 0.0             # No fairness penalty needed
   episode_length: 50
   action_type: 'discrete'

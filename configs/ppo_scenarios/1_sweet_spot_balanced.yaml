@@ -16,9 +16,9 @@ network:
 
 environment:
   qos_min_rate_mbps: 5.0
-  qos_weight: 2.0                  # BALANCED: QoS penalty weight
-  rate_weight: 1.0                 # Unified Reward: log sum-rate importance
-  power_penalty_weight: 1.0        # Unified Reward: normalized power penalty
+  qos_weight: 5.0                  # BALANCED: QoS penalty weight (magnitude-balanced)
+  rate_weight: 0.1                 # Unified Reward: log sum-rate (scaled down for balance)
+  power_penalty_weight: 2.0        # Unified Reward: normalized power penalty (scaled up)
   fairness_weight: 0.0             # No fairness penalty (10 users, not needed)
   episode_length: 50
   action_type: 'discrete'
