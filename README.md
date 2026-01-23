@@ -121,32 +121,6 @@ PPO agent achieves **8-69x** energy efficiency improvement over Equal Power Allo
 3. **100% QoS Satisfaction**: All users maintain >5 Mbps across all scenarios
 4. **Topology Adaptation**: Same reward framework works for 10-64 APs, 5-264 users
 
-## Configuration
-
-Each YAML file defines scenario-specific parameters:
-
-```yaml
-environment:
-  qos_min_rate_mbps: 5.0
-  qos_weight: 2.0                  # QoS penalty weight (γ)
-  rate_weight: 1.0                 # Log sum-rate importance (α)
-  power_penalty_weight: 1.0        # Normalized power penalty (β)
-  fairness_weight: 0.0             # Jain's Index penalty (δ)
-  episode_length: 50
-  action_type: 'discrete'
-  num_power_levels: 5
-  randomize_circuit_power: true    # Adaptive circuit power
-  circuit_power_range: [0.1, 0.5]  # 100-500mW per AP
-
-training:
-  total_timesteps: 200000
-  ppo:
-    learning_rate: 0.0003
-    n_steps: 2048
-    batch_size: 256
-    n_epochs: 10
-```
-
 ## System Model
 
 - **Downlink Cell-Free Massive MIMO**
@@ -155,16 +129,6 @@ training:
 - **SINR Formula**: γ_k = Σ(m∈M_k) P_m|g_mk|² / (interference + noise)
 - **Power Consumption**: P_total = Σ P_m + P_circ × N_active
 - **Deep Sleep**: Inactive APs consume zero power
-
-## State Space (371 dimensions)
-
-```python
-state = [
-    channel_gains,      # M×K flattened (360 for 36 APs, 10 users)
-    qos_requirements,   # K users (10)
-    circuit_power       # 1 scalar
-]
-```
 
 ## Action Space (20 discrete actions)
 
@@ -180,28 +144,3 @@ state = [
 4. **Fairness**: Jain's Index
 5. **Active APs**: Sleep mode efficiency
 
-## Citation
-
-```bibtex
-@article{ozturk2025cellfree,
-  title={AI-Driven Energy-Efficient Resource Allocation in 6G Cell-Free Networks},
-  author={Öztürk, Bengisu},
-  journal={CENG505 Project},
-  year={2025}
-}
-```
-
-## References
-
-- [NVIDIA Sionna](https://nvlabs.github.io/sionna/) - Physical layer simulation
-- [Stable-Baselines3](https://stable-baselines3.readthedocs.io/) - PPO implementation
-- [Gymnasium](https://gymnasium.farama.org/) - RL environment standard
-
-## License
-
-Academic use only - MIT License
-
-## Contact
-
-Bengisu Öztürk - beozturk@std.iyte.edu.tr
-Izmir Institute of Technology
