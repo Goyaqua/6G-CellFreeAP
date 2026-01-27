@@ -1,15 +1,27 @@
 """
 Cell-Free Network Simulation using Sionna
 Physical Layer Modeling and Performance Metrics
+
+Supports two channel modes:
+1. Statistical (Rayleigh + Path Loss) - Fast, for training
+2. Ray Tracing (Sionna RT) - Realistic, for evaluation
 """
 
 import tensorflow as tf
 import numpy as np
 import matplotlib.pyplot as plt
-from typing import Tuple, Dict, Optional
+from typing import Tuple, Dict, Optional, List
 import sionna
 from sionna.channel import RayleighBlockFading, AWGN
 from sionna.utils import QAMSource
+
+# Ray Tracing imports (conditional)
+try:
+    from sionna.rt import load_scene, Transmitter, Receiver, PlanarArray, Camera
+    RT_AVAILABLE = True
+except ImportError:
+    RT_AVAILABLE = False
+    print("Warning: Sionna RT not available. Only statistical channel mode supported.")
 
 
 class CellFreeNetworkSionna:
@@ -31,7 +43,13 @@ class CellFreeNetworkSionna:
         max_power_per_ap: float = 200e-3,
         noise_power_dbm: float = -94,
         circuit_power_per_ap: float = 200e-3,
-        seed: Optional[int] = None
+        seed: Optional[int] = None,
+        # NEW: Ray Tracing parameters
+        use_ray_tracing: bool = False,
+        rt_scene_name: str = "etoile",
+        rt_max_depth: int = 5,
+        rt_ap_height: float = 8.0,
+        rt_user_height: float = 1.5
     ):
         """
         Initialize Cell-Free Network
@@ -40,13 +58,18 @@ class CellFreeNetworkSionna:
             num_aps: Number of Access Points
             num_users: Number of users
             num_antennas_per_ap: Number of antennas per AP
-            area_size: Coverage area size (meters)
+            area_size: Coverage area size (meters) [ignored if use_ray_tracing=True]
             carrier_frequency: Carrier frequency (Hz)
             bandwidth: System bandwidth (Hz)
             max_power_per_ap: Maximum transmit power per AP (Watts)
             noise_power_dbm: Noise power (dBm)
             circuit_power_per_ap: Circuit power consumption per active AP (Watts)
             seed: Random seed for reproducibility
+            use_ray_tracing: Enable realistic ray tracing (Sionna RT)
+            rt_scene_name: RT scene name ('etoile', 'munich', 'simple_street_canyon')
+            rt_max_depth: Max number of reflections in ray tracing
+            rt_ap_height: AP height in meters (street lamp level: 6-10m)
+            rt_user_height: User height in meters (handheld: 1.5m)
         """
         self.num_aps = num_aps
         self.num_users = num_users
@@ -57,48 +80,164 @@ class CellFreeNetworkSionna:
         self.max_power_per_ap = max_power_per_ap
         self.noise_power_dbm = noise_power_dbm
         self.circuit_power_per_ap = circuit_power_per_ap
-        
+
+        # Ray Tracing settings
+        self.use_ray_tracing = use_ray_tracing
+        self.rt_scene_name = rt_scene_name
+        self.rt_max_depth = rt_max_depth
+        self.rt_ap_height = rt_ap_height
+        self.rt_user_height = rt_user_height
+
         # Set random seed
         if seed is not None:
             np.random.seed(seed)
             tf.random.set_seed(seed)
-        
+
         # Total transmit antennas
         self.num_tx = num_aps * num_antennas_per_ap
         self.num_rx_per_user = 1  # Single antenna users
-        
+
         # Deploy network
-        self.ap_positions = self._deploy_aps()
-        self.user_positions = self._deploy_users()
-        self.distances = self._calculate_distances()
-        
-        # Setup channel model
-        self._setup_channel()
-        
+        if self.use_ray_tracing and RT_AVAILABLE:
+            # RT Mode: Load scene first, then deploy APs/Users
+            self._setup_rt_scene()
+        else:
+            # Statistical Mode: Random deployment
+            self.ap_positions = self._deploy_aps()
+            self.user_positions = self._deploy_users()
+            self.distances = self._calculate_distances()
+
+            # Setup statistical channel model
+            self._setup_channel()
+
         # Convert noise power to linear scale (Watts)
         # dbm is logarithmic scale:
         # Thus, noise_power_linear = 10^(noise_power_dbm/10) / 1000
         self.noise_power_linear = 10**(self.noise_power_dbm / 10) / 1000
         
-    def _deploy_aps(self) -> np.ndarray:
-        """Deploy APs in a regular GRID pattern"""
+    def _setup_rt_scene(self):
+        """Setup Sionna RT scene and deploy APs/Users"""
+        # Load scene
+        if self.rt_scene_name == "etoile":
+            self.rt_scene = load_scene(sionna.rt.scene.etoile)
+        elif self.rt_scene_name == "munich":
+            self.rt_scene = load_scene(sionna.rt.scene.munich)
+        elif self.rt_scene_name == "simple_street_canyon":
+            self.rt_scene = load_scene(sionna.rt.scene.simple_street_canyon)
+        else:
+            raise ValueError(f"Unknown RT scene: {self.rt_scene_name}")
+
+        # Set frequency
+        self.rt_scene.frequency = self.carrier_frequency
+
+        # Enable synthetic array for MIMO
+        self.rt_scene.synthetic_array = True
+
+        # Deploy APs and Users in RT scene
+        self.ap_positions = self._deploy_aps_rt()
+        self.user_positions = self._deploy_users_rt()
+
+        # Calculate distances (for metrics)
+        self.distances = self._calculate_distances()
+
+    def _deploy_aps_rt(self) -> np.ndarray:
+        """Deploy APs in RT scene at street lamp level (cell-free style)"""
+        # Get scene-specific bounds
+        if self.rt_scene_name == "simple_street_canyon":
+            x_range = (10, 90)
+            y_range = (10, 90)
+        else:  # etoile, munich
+            x_range = (-150, 150)
+            y_range = (-150, 150)
+
+        # Deploy in grid pattern within bounds
         side_length = int(np.ceil(np.sqrt(self.num_aps)))
-        spacing = self.area_size / (side_length + 1)
-        
+        x_spacing = (x_range[1] - x_range[0]) / (side_length + 1)
+        y_spacing = (y_range[1] - y_range[0]) / (side_length + 1)
+
         positions = []
         count = 0
         for i in range(side_length):
             for j in range(side_length):
                 if count >= self.num_aps:
                     break
-                x = (i + 1) * spacing
-                y = (j + 1) * spacing
+                x = x_range[0] + (i + 1) * x_spacing
+                y = y_range[0] + (j + 1) * y_spacing
                 positions.append([x, y])
                 count += 1
             if count >= self.num_aps:
                 break
-        
-        return np.array(positions)
+
+        positions = np.array(positions)
+
+        # Add APs to RT scene as Transmitters
+        self.rt_transmitters = []
+        for i in range(self.num_aps):
+            # Create antenna array
+            antenna_array = PlanarArray(
+                num_rows=1,
+                num_cols=self.num_antennas_per_ap,
+                vertical_spacing=0.5,
+                horizontal_spacing=0.5,
+                pattern="iso",
+                polarization="V"
+            )
+
+            # Create transmitter
+            tx = Transmitter(
+                name=f"AP_{i}",
+                position=[positions[i, 0], positions[i, 1], self.rt_ap_height]
+            )
+            tx.antenna.array = antenna_array
+
+            self.rt_scene.add(tx)
+            self.rt_transmitters.append(tx)
+
+        return positions
+
+    def _deploy_users_rt(self) -> np.ndarray:
+        """Deploy users randomly in RT scene at handheld height"""
+        # Get scene-specific bounds
+        if self.rt_scene_name == "simple_street_canyon":
+            x_range = (10, 90)
+            y_range = (10, 90)
+        else:  # etoile, munich
+            x_range = (-150, 150)
+            y_range = (-150, 150)
+
+        # Random deployment
+        positions = np.zeros((self.num_users, 2))
+        positions[:, 0] = np.random.uniform(x_range[0], x_range[1], self.num_users)
+        positions[:, 1] = np.random.uniform(y_range[0], y_range[1], self.num_users)
+
+        # Add Users to RT scene as Receivers
+        self.rt_receivers = []
+        for i in range(self.num_users):
+            # Single antenna for users
+            antenna_array = PlanarArray(
+                num_rows=1,
+                num_cols=1,
+                vertical_spacing=0.5,
+                horizontal_spacing=0.5,
+                pattern="iso",
+                polarization="V"
+            )
+
+            # Create receiver
+            rx = Receiver(
+                name=f"User_{i}",
+                position=[positions[i, 0], positions[i, 1], self.rt_user_height]
+            )
+            rx.antenna.array = antenna_array
+
+            self.rt_scene.add(rx)
+            self.rt_receivers.append(rx)
+
+        return positions
+
+    def _deploy_aps(self) -> np.ndarray:
+        """Deploy APs RANDOMLY in coverage area (statistical mode)"""
+        return np.random.uniform(0, self.area_size, (self.num_aps, 2))
     
     def _deploy_users(self) -> np.ndarray:
         """Deploy users randomly in the coverage area"""
@@ -167,10 +306,71 @@ class CellFreeNetworkSionna:
 
         return pathloss_linear
     
-    @tf.function(experimental_relax_shapes=True)
     def generate_channel_matrix(self, batch_size: int = 1) -> tf.Tensor:
         """
-        Generate channel matrix with both small-scale and large-scale fading.
+        Generate channel matrix - dispatches to RT or statistical mode
+
+        Returns:
+            Channel matrix (batch_size, num_users, num_tx) [Complex64]
+        """
+        if self.use_ray_tracing and RT_AVAILABLE:
+            return self._generate_channel_rt(batch_size)
+        else:
+            return self._generate_channel_statistical(batch_size)
+
+    def _generate_channel_rt(self, batch_size: int = 1) -> tf.Tensor:
+        """
+        Generate channel using Ray Tracing (Sionna RT)
+
+        Note: RT is deterministic for fixed positions, so batch_size > 1
+        returns identical channels (good for training stability)
+        """
+        # Compute propagation paths
+        paths = self.rt_scene.compute_paths(
+            max_depth=self.rt_max_depth,
+            scattering=True,
+            diffraction=False,  # Too slow, disabled
+            edge_diffraction=False
+        )
+
+        # Get channel impulse response
+        # Shape varies by Sionna version, we'll handle it carefully
+        a, tau = paths.cir()
+
+        # a: path coefficients [batch, num_rx, num_rx_ant, num_tx, num_tx_ant, num_paths, num_time_steps]
+        # Simplify to [num_users, num_tx] by summing over paths and removing extra dims
+
+        # Squeeze to remove singleton dimensions
+        a = tf.squeeze(a)
+
+        # Handle different output shapes
+        if len(a.shape) == 4:  # [num_rx, num_rx_ant, num_tx, num_tx_ant]
+            # Average over antennas (simple combining)
+            a = tf.reduce_mean(a, axis=[1, 3])  # [num_users, num_tx]
+        elif len(a.shape) == 3:  # Already [num_rx, num_tx, something]
+            a = tf.reduce_mean(a, axis=-1)
+        elif len(a.shape) > 4:
+            # More complex shape, try aggressive squeezing
+            a = tf.reduce_mean(a, axis=list(range(2, len(a.shape))))
+
+        # Ensure shape is [num_users, num_tx]
+        if len(a.shape) != 2:
+            # Fallback: reshape
+            a = tf.reshape(a, [self.num_users, self.num_tx])
+
+        # Add batch dimension
+        h = tf.expand_dims(a, axis=0)
+
+        # Repeat for batch_size
+        if batch_size > 1:
+            h = tf.repeat(h, repeats=batch_size, axis=0)
+
+        return h
+
+    @tf.function(experimental_relax_shapes=True)
+    def _generate_channel_statistical(self, batch_size: int = 1) -> tf.Tensor:
+        """
+        Generate channel matrix with Rayleigh fading + path loss (statistical mode)
         FIXED: Added num_time_steps=1 argument for Sionna compatibility.
         FIXED: Explicit casting for Complex64 compatibility.
         OPTIMIZED: @tf.function decorator prevents memory leak from graph rebuilding.
@@ -188,28 +388,28 @@ class CellFreeNetworkSionna:
         if len(h.shape) == 2:
             h = tf.expand_dims(h, axis=0)
         # Result shape: [batch_size, num_users, num_tx]
-        
+
         # 3. Calculate Large-Scale Fading (Path Loss) -> FLOAT32
         pathloss = self.calculate_pathloss()
-        
+
         # Expand path loss for batch dimension and repeat for antennas
         pathloss_per_antenna = tf.repeat(
             pathloss,
             repeats=self.num_antennas_per_ap,
             axis=0
         )  # Shape: (num_tx, num_users)
-        
+
         pathloss_per_antenna = tf.transpose(pathloss_per_antenna) # Shape: (num_users, num_tx)
-        
+
         pathloss_batched = tf.expand_dims(pathloss_per_antenna, axis=0)
         pathloss_batched = tf.repeat(pathloss_batched, repeats=batch_size, axis=0)
-        
+
         # 4. Apply path loss to small-scale fading
         # ÖNCEKİ FIX: Float olan pathloss'u Complex64'e çeviriyoruz
         pathloss_complex = tf.cast(tf.sqrt(pathloss_batched), dtype=tf.complex64)
-        
+
         h_with_pathloss = h * pathloss_complex
-        
+
         return h_with_pathloss
     
     def calculate_sinr_and_rate(

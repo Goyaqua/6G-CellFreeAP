@@ -7,19 +7,26 @@ network:
   num_aps: 36                    # SWEET SPOT APs
   num_users: 20                  # HIGH INTERFERENCE: Double the users
   num_antennas_per_ap: 1
-  area_size: 500.0
+  area_size: 500.0               # Ignored in RT mode
   carrier_frequency: 3.5e9
   bandwidth: 10e6
   max_power_per_ap: 0.2
   noise_power_dbm: -94
   circuit_power_per_ap: 0.2
 
+  # Ray Tracing Configuration
+  use_ray_tracing: false         # Set to true for realistic RT evaluation
+  rt_scene_name: 'etoile'        # 'etoile' (Paris), 'munich', 'simple_street_canyon'
+  rt_max_depth: 5                # Max reflections (5 = good balance)
+  rt_ap_height: 8.0              # Street lamp level (6-10m for cell-free)
+  rt_user_height: 1.5            # Handheld device height
+
 environment:
   qos_min_rate_mbps: 5.0
-  qos_weight: 5.0                  # High QoS importance (20 users, magnitude-balanced)
-  rate_weight: 0.1                 # Unified Reward: scaled for 20 users (~40 magnitude)
-  power_penalty_weight: 3.0        # Power penalty scaled up for balance
-  fairness_weight: 10.0            # Fairness critical! (20 users, scaled up)
+  qos_weight: 10.0                 # QoS penalty (magnitude ~0-100 for 20 users)
+  rate_weight: 1.0                 # Log sum-rate weight (magnitude ~30-50 for 20 users)
+  power_penalty_weight: 30.0       # Higher power penalty (20 users need more APs)
+  fairness_weight: 100.0           # CRITICAL! Fairness essential for 20 users
   episode_length: 50
   action_type: 'discrete'
   num_power_levels: 5

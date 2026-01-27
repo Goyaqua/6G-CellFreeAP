@@ -86,6 +86,14 @@ class CellFreeEnv(gym.Env):
                 self.randomize_circuit_power = config['environment']['randomize_circuit_power']
             if 'circuit_power_range' in config['environment']:
                 self.circuit_power_range = tuple(config['environment']['circuit_power_range'])
+
+            # Ray Tracing parameters (NEW)
+            network_cfg = config['network']
+            use_ray_tracing = network_cfg.get('use_ray_tracing', False)
+            rt_scene_name = network_cfg.get('rt_scene_name', 'etoile')
+            rt_max_depth = network_cfg.get('rt_max_depth', 5)
+            rt_ap_height = network_cfg.get('rt_ap_height', 8.0)
+            rt_user_height = network_cfg.get('rt_user_height', 1.5)
         else:
             self.num_aps = num_aps
             self.num_users = num_users
@@ -106,13 +114,20 @@ class CellFreeEnv(gym.Env):
         else:
             circuit_power = 0.2  # Default 200mW
 
+        # Pass RT parameters to network
         self.network = CellFreeNetworkSionna(
             num_aps=self.num_aps,
             num_users=self.num_users,
             num_antennas_per_ap=1,
             area_size=500.0,
             circuit_power_per_ap=circuit_power,
-            seed=42
+            seed=42,
+            # Ray Tracing parameters
+            use_ray_tracing=use_ray_tracing if config_path else False,
+            rt_scene_name=rt_scene_name if config_path else 'etoile',
+            rt_max_depth=rt_max_depth if config_path else 5,
+            rt_ap_height=rt_ap_height if config_path else 8.0,
+            rt_user_height=rt_user_height if config_path else 1.5
         )
         
         # QoS requirements for each user
@@ -283,7 +298,7 @@ class CellFreeEnv(gym.Env):
     ) -> Tuple[np.ndarray, np.ndarray]:
         """
         Convert action to power allocation and AP association
-        
+
         Returns:
             power_allocation: (num_aps,) power in Watts
             ap_association: (num_aps, num_users) binary matrix
@@ -299,14 +314,14 @@ class CellFreeEnv(gym.Env):
 
             # Apply AP selection strategy
             ap_association = self._apply_ap_strategy(ap_strategy_idx)
-            
+
         else:  # continuous
             # First num_aps values are power allocation
             power_allocation = action[:self.num_aps] * self.network.max_power_per_ap
-            
+
             # Last value is association threshold
             threshold = action[-1]
-            
+
             # Get channel gains for association
             channel_gain = tf.abs(self.current_channel[0]).numpy()
             channel_gain_per_ap = np.zeros((self.num_aps, self.num_users))
@@ -317,22 +332,28 @@ class CellFreeEnv(gym.Env):
                     channel_gain[:, ant_start:ant_end],
                     axis=1
                 )
-            
+
             # Threshold-based association
             ap_association = np.zeros((self.num_aps, self.num_users))
             for user_idx in range(self.num_users):
                 # Normalize gains for this user
                 gains = channel_gain_per_ap[:, user_idx]
                 gains_norm = (gains - gains.min()) / (gains.max() - gains.min() + 1e-10)
-                
+
                 # Associate with APs above threshold
                 serving_aps = gains_norm >= threshold
                 if not serving_aps.any():
                     # If no AP above threshold, use nearest
                     serving_aps[np.argmax(gains)] = True
-                
+
                 ap_association[serving_aps, user_idx] = 1
-        
+
+        # CRITICAL: Synchronize AP association with power allocation
+        # If AP has zero power (sleep mode), it cannot serve any users
+        for ap_idx in range(self.num_aps):
+            if power_allocation[ap_idx] < 1e-6:  # Power ≈ 0 (sleep mode)
+                ap_association[ap_idx, :] = 0  # No users served
+
         return power_allocation, ap_association
     
     def _apply_power_strategy(self, power_idx: int) -> np.ndarray:
@@ -340,13 +361,13 @@ class CellFreeEnv(gym.Env):
         Apply power allocation strategy based on index
 
         Strategies:
-        0: Very Low (20%)
-        1: Low (40%)
-        2: Medium (60%)
-        3: High (80%)
+        0: Off (0%) - AP SLEEP MODE
+        1: Low (50%) - Minimum for QoS satisfaction
+        2: Medium (70%)
+        3: High (85%)
         4: Maximum (100%)
         """
-        power_levels = [0.2, 0.4, 0.6, 0.8, 1.0]
+        power_levels = [0.0, 0.5, 0.7, 0.85, 1.0]
         power_level = power_levels[power_idx]
 
         # All APs use same power level (could be extended to per-AP in future)
@@ -430,13 +451,15 @@ class CellFreeEnv(gym.Env):
         # log1p(x) = log(1 + x) → avoids log(0) issues
         log_sum_rate = np.sum(np.log1p(user_rates_mbps))
 
-        # 2. QoS Penalty
+        # 2. QoS Penalty (Logarithmic - softer penalty)
         qos_violations = np.maximum(0, self.qos_min_rate / 1e6 - user_rates_mbps)
-        qos_penalty = self.qos_weight * np.sum(qos_violations)
+        qos_penalty = self.qos_weight * np.sum(np.log1p(qos_violations))
 
         # 3. Normalized Power Cost
         total_tx_power = np.sum(power_allocation)
-        active_aps = np.sum(np.sum(ap_association, axis=1) > 0)
+        # Circuit power only for APs with TX power > 0 (sleep mode support)
+        active_aps_mask = power_allocation > 1e-6
+        active_aps = np.sum(active_aps_mask)
         total_circuit_power = active_aps * self.network.circuit_power_per_ap
         total_power = total_tx_power + total_circuit_power
 

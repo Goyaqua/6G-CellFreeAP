@@ -7,18 +7,25 @@ network:
   num_aps: 64                    # MASSIVE: Many APs available
   num_users: 10
   num_antennas_per_ap: 1
-  area_size: 500.0
+  area_size: 500.0               # Ignored in RT mode
   carrier_frequency: 3.5e9
   bandwidth: 10e6
   max_power_per_ap: 0.2
   noise_power_dbm: -94
   circuit_power_per_ap: 0.2
 
+  # Ray Tracing Configuration
+  use_ray_tracing: false         # Set to true for realistic RT evaluation
+  rt_scene_name: 'etoile'        # 'etoile' (Paris), 'munich', 'simple_street_canyon'
+  rt_max_depth: 5                # Max reflections (5 = good balance)
+  rt_ap_height: 8.0              # Street lamp level (6-10m for cell-free)
+  rt_user_height: 1.5            # Handheld device height
+
 environment:
   qos_min_rate_mbps: 5.0
-  qos_weight: 5.0                  # Magnitude-balanced
-  rate_weight: 0.1                 # Unified Reward (scaled for 10 users)
-  power_penalty_weight: 3.0        # Penalize excess power (64 APs! scaled up)
+  qos_weight: 10.0                 # QoS penalty
+  rate_weight: 1.0                 # Log sum-rate weight
+  power_penalty_weight: 50.0       # VERY HIGH! Force agent to shut down unnecessary APs
   fairness_weight: 0.0             # No fairness penalty needed (10 users)
   episode_length: 50
   action_type: 'discrete'

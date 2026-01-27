@@ -7,18 +7,25 @@ network:
   num_aps: 10                    # SPARSE: Limited AP resources
   num_users: 5                   # Proportionally fewer users
   num_antennas_per_ap: 1
-  area_size: 500.0
+  area_size: 500.0               # Ignored in RT mode
   carrier_frequency: 3.5e9
   bandwidth: 10e6
   max_power_per_ap: 0.2
   noise_power_dbm: -94
   circuit_power_per_ap: 0.2
 
+  # Ray Tracing Configuration
+  use_ray_tracing: false         # Set to true for realistic RT evaluation
+  rt_scene_name: 'etoile'        # 'etoile' (Paris), 'munich', 'simple_street_canyon'
+  rt_max_depth: 5                # Max reflections (5 = good balance)
+  rt_ap_height: 8.0              # Street lamp level (6-10m for cell-free)
+  rt_user_height: 1.5            # Handheld device height
+
 environment:
   qos_min_rate_mbps: 5.0
-  qos_weight: 5.0                  # Magnitude-balanced
-  rate_weight: 0.15                # Unified Reward (slightly higher for sparse, 5 users)
-  power_penalty_weight: 3.0        # Focus on efficiency (scaled up)
+  qos_weight: 10.0                 # QoS penalty (magnitude ~0-25 for 5 users)
+  rate_weight: 2.0                 # HIGHER! Rate critical in sparse networks (magnitude ~15-25)
+  power_penalty_weight: 15.0       # Lower power penalty (only 10 APs, efficiency less critical)
   fairness_weight: 0.0             # Simple, no fairness needed (5 users)
   episode_length: 50
   action_type: 'discrete'
