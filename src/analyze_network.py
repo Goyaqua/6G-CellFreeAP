@@ -1,19 +1,13 @@
 """
-Unified Network Analysis Tool
-Comprehensive evaluation and visualization for Cell-Free Massive MIMO with RL
+Network Analysis Tool - Comprehensive evaluation and visualization
+Combines visualization and evaluation capabilities for Cell-Free Massive MIMO
 
 Usage:
-    # Basic evaluation with visualizations
-    python src/analyze_network.py --mode evaluate --model MODEL_PATH
+    # Basic evaluation with visualizations and baseline comparison
+    python src/analyze_network.py --model MODEL_PATH --config configs/default.yaml
 
-    # Circuit power sensitivity analysis
-    python src/analyze_network.py --mode circuit-power --model MODEL_PATH
-
-    # AP scaling analysis
-    python src/analyze_network.py --mode ap-scaling --model MODEL_PATH
-
-    # User scaling analysis
-    python src/analyze_network.py --mode user-scaling --model MODEL_PATH
+    # Evaluation without RL model (baselines only)
+    python src/analyze_network.py --config configs/default.yaml
 """
 
 import sys
@@ -21,13 +15,17 @@ import os
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 import argparse
+import yaml
 import numpy as np
 import matplotlib.pyplot as plt
 from typing import Dict, List, Tuple, Optional
 from environment.cellfree_env import CellFreeEnv
 from agents.dqn_agent import DQNAgent
+from agents.ppo_agent import PPOAgent
 from agents.baselines import BaselineStrategies
 from network.cellfree_network import CellFreeNetworkSionna
+import json
+
 
 # ============================================================================
 # VISUALIZATION FUNCTIONS
@@ -66,6 +64,7 @@ def plot_network_topology(network, title="Network Topology", save_path=None):
 
     plt.tight_layout()
     if save_path:
+        os.makedirs(os.path.dirname(save_path), exist_ok=True)
         plt.savefig(save_path, dpi=300, bbox_inches='tight')
         print(f"✓ Saved topology plot: {save_path}")
     return fig
@@ -101,6 +100,7 @@ def plot_channel_gain_matrix(channel_gain, title="Channel Gain Matrix", save_pat
 
     plt.tight_layout()
     if save_path:
+        os.makedirs(os.path.dirname(save_path), exist_ok=True)
         plt.savefig(save_path, dpi=300, bbox_inches='tight')
         print(f"✓ Saved channel gain plot: {save_path}")
     return fig
@@ -146,134 +146,329 @@ def plot_ap_user_association(association_matrix, strategy_name="Strategy", save_
 
     plt.tight_layout()
     if save_path:
+        # Ensure directory exists before saving
+        os.makedirs(os.path.dirname(save_path), exist_ok=True)
         plt.savefig(save_path, dpi=300, bbox_inches='tight')
         print(f"✓ Saved association matrix: {save_path}")
     return fig
+
+
+def plot_comprehensive_comparison(rl_results, baseline_results, save_dir):
+    """Create comprehensive comparison plots"""
+    os.makedirs(save_dir, exist_ok=True)
+
+    # Prepare data
+    all_strategies = ['RL Agent'] + list(baseline_results.keys())
+    all_results = {'RL Agent': rl_results, **baseline_results}
+
+    # Metrics to plot
+    metrics = [
+        ('mean_energy_efficiency', 'Energy Efficiency (bits/Joule)', True),
+        ('mean_rate_mbps', 'Average Rate per User (Mbps)', False),
+        ('mean_qos_satisfaction', 'QoS Satisfaction (%)', False),
+        ('mean_sinr_db', 'Average SINR (dB)', False),
+    ]
+
+    # 1. Bar chart comparison (2x2 grid)
+    fig1, axes = plt.subplots(2, 2, figsize=(14, 10))
+    fig1.suptitle('Performance Comparison: RL Agent vs Baselines', fontsize=16, fontweight='bold')
+
+    colors = ['#FF6B6B', '#4ECDC4', '#95E1D3', '#F38181']
+
+    for idx, (metric_key, ylabel, use_log) in enumerate(metrics):
+        row = idx // 2
+        col = idx % 2
+        ax = axes[row, col]
+
+        values = [all_results[s][metric_key] for s in all_strategies]
+        stds = [all_results[s].get(f"std_{metric_key.replace('mean_', '')}", 0) for s in all_strategies]
+
+        bars = ax.bar(all_strategies, values, color=colors[:len(all_strategies)],
+                     alpha=0.8, edgecolor='black', linewidth=1.5)
+        ax.errorbar(range(len(all_strategies)), values, yerr=stds, fmt='none',
+                   ecolor='black', capsize=5, capthick=2)
+
+        ax.set_ylabel(ylabel, fontsize=12, fontweight='bold')
+        ax.set_title(ylabel, fontsize=13, fontweight='bold')
+        ax.grid(True, alpha=0.3, linestyle='--', axis='y')
+
+        if use_log:
+            ax.set_yscale('log')
+
+        # Rotate x labels
+        ax.set_xticks(range(len(all_strategies)))
+        ax.set_xticklabels(all_strategies, rotation=45, ha='right')
+
+        # Add value labels on bars
+        for bar, val in zip(bars, values):
+            height = bar.get_height()
+            if use_log:
+                ax.text(bar.get_x() + bar.get_width()/2., height,
+                       f'{val:.1e}', ha='center', va='bottom', fontsize=9)
+            else:
+                ax.text(bar.get_x() + bar.get_width()/2., height,
+                       f'{val:.1f}', ha='center', va='bottom', fontsize=9)
+
+    plt.tight_layout()
+    plot1_path = os.path.join(save_dir, 'comparison_bar_chart.png')
+    plt.savefig(plot1_path, dpi=300, bbox_inches='tight')
+    print(f"✓ Saved: {plot1_path}")
+    plt.close()
+
+    # 2. Normalized performance radar chart
+    fig2, ax = plt.subplots(figsize=(10, 10), subplot_kw=dict(projection='polar'))
+
+    # Normalize metrics (higher is better)
+    metric_names = ['Energy\nEfficiency', 'Rate', 'QoS\nSatisfaction', 'SINR']
+    metric_keys_normalized = ['mean_energy_efficiency', 'mean_rate_mbps',
+                              'mean_qos_satisfaction', 'mean_sinr_db']
+
+    # Find max values for normalization
+    max_values = {k: max([all_results[s][k] for s in all_strategies])
+                 for k in metric_keys_normalized}
+
+    angles = np.linspace(0, 2 * np.pi, len(metric_names), endpoint=False).tolist()
+    angles += angles[:1]  # Complete the circle
+
+    for idx, strategy in enumerate(all_strategies):
+        values = [all_results[strategy][k] / max_values[k] * 100
+                 for k in metric_keys_normalized]
+        values += values[:1]  # Complete the circle
+
+        ax.plot(angles, values, 'o-', linewidth=2, label=strategy, color=colors[idx])
+        ax.fill(angles, values, alpha=0.15, color=colors[idx])
+
+    ax.set_xticks(angles[:-1])
+    ax.set_xticklabels(metric_names, fontsize=11)
+    ax.set_ylim(0, 100)
+    ax.set_yticks([20, 40, 60, 80, 100])
+    ax.set_yticklabels(['20%', '40%', '60%', '80%', '100%'])
+    ax.set_title('Normalized Performance Comparison\n(100% = Best in Each Metric)',
+                fontsize=14, fontweight='bold', pad=20)
+    ax.legend(loc='upper right', bbox_to_anchor=(1.3, 1.1))
+    ax.grid(True)
+
+    plot2_path = os.path.join(save_dir, 'comparison_radar_chart.png')
+    plt.savefig(plot2_path, dpi=300, bbox_inches='tight')
+    print(f"✓ Saved: {plot2_path}")
+    plt.close()
 
 
 # ============================================================================
 # EVALUATION FUNCTIONS
 # ============================================================================
 
-def evaluate_rl_agent(env, agent, n_episodes=10):
-    """Evaluate RL agent and return metrics + final state for visualization"""
-    all_rates = []
+def safe_evaluate_rl_agent(agent, env, n_episodes=20, max_steps=100):
+    """Safely evaluate RL agent with timeout protection"""
+    all_rewards = []
     all_ee = []
     all_qos = []
+    all_rates = []
+    all_sinr = []
     all_active_aps = []
-    all_rewards = []
     final_association = None
+
+    print(f"Evaluating RL agent for {n_episodes} episodes...")
 
     for episode in range(n_episodes):
         obs, info = env.reset()
         episode_reward = 0
         done = False
         steps = 0
-        max_steps = 100
 
         while not done and steps < max_steps:
             try:
                 action, _ = agent.model.predict(obs, deterministic=True)
                 obs, reward, terminated, truncated, info = env.step(action)
                 done = terminated or truncated
-                steps += 1
                 episode_reward += reward
+                steps += 1
 
-                if 'avg_rate_mbps' in info:
-                    all_rates.append(info['avg_rate_mbps'])
+                # Store metrics from last step
                 if 'energy_efficiency' in info:
                     all_ee.append(info['energy_efficiency'])
                 if 'qos_satisfaction' in info:
                     all_qos.append(info['qos_satisfaction'])
+                if 'avg_rate_mbps' in info:
+                    all_rates.append(info['avg_rate_mbps'])
+                if 'sinr_db' in info:
+                    all_sinr.append(info['sinr_db'])
                 if 'active_aps' in info:
                     all_active_aps.append(info['active_aps'])
 
                 # Save last association for visualization
                 if episode == n_episodes - 1 and steps == max_steps - 1:
-                    # Decode action to get association matrix
                     _, final_association = env._action_to_allocation(action)
 
             except Exception as e:
-                print(f"⚠️ Error in episode {episode+1}: {e}")
+                print(f"\n⚠️ Error in episode {episode+1}: {e}")
                 break
 
         all_rewards.append(episode_reward)
+        if (episode + 1) % 5 == 0:
+            print(f"  Episode {episode+1}/{n_episodes}: Reward={episode_reward:.4f}, Steps={steps}")
 
+    # Calculate statistics
     results = {
-        'strategy': 'RL Agent',
-        'mean_reward': float(np.mean(all_rewards)) if all_rewards else 0,
-        'mean_rate': float(np.mean(all_rates)) if all_rates else 0,
-        'mean_ee': float(np.mean(all_ee)) if all_ee else 0,
-        'mean_qos': float(np.mean(all_qos)) if all_qos else 0,
-        'mean_active_aps': float(np.mean(all_active_aps)) if all_active_aps else 0,
+        'mean_reward': np.mean(all_rewards) if len(all_rewards) > 0 else 0,
+        'std_reward': np.std(all_rewards) if len(all_rewards) > 0 else 0,
+        'mean_energy_efficiency': np.mean(all_ee) if len(all_ee) > 0 else 0,
+        'std_energy_efficiency': np.std(all_ee) if len(all_ee) > 0 else 0,
+        'mean_qos_satisfaction': np.mean(all_qos) if len(all_qos) > 0 else 0,
+        'std_qos_satisfaction': np.std(all_qos) if len(all_qos) > 0 else 0,
+        'mean_rate_mbps': np.mean(all_rates) if len(all_rates) > 0 else 0,
+        'std_rate_mbps': np.std(all_rates) if len(all_rates) > 0 else 0,
+        'mean_sinr_db': np.mean(all_sinr) if len(all_sinr) > 0 else 0,
+        'std_sinr_db': np.std(all_sinr) if len(all_sinr) > 0 else 0,
+        'mean_active_aps': np.mean(all_active_aps) if len(all_active_aps) > 0 else 0,
+        'std_active_aps': np.std(all_active_aps) if len(all_active_aps) > 0 else 0,
         'association_matrix': final_association
     }
 
     return results
 
 
-def evaluate_baseline(network, strategy_func, strategy_name, n_episodes=10):
-    """Evaluate baseline strategy"""
-    all_rates = []
-    all_ee = []
-    all_qos = []
-    all_active_aps = []
-    qos_threshold = 5.0  # Mbps
-
-    for _ in range(n_episodes):
-        # Generate channel matrix for this episode
-        channel_matrix = network.generate_channel_matrix(batch_size=1)
-
-        # Get baseline decision (now with channel_matrix)
-        power_allocation, ap_selection = strategy_func(network, channel_matrix)
-
-        # Calculate SINR and rates
-        sinr, rates = network.calculate_sinr_and_rate(channel_matrix, power_allocation, ap_selection)
-        rates_mbps = (rates.numpy()[0] / 1e6)  # Convert to Mbps
-
-        mean_rate = float(np.mean(rates_mbps))
-        total_power = np.sum(power_allocation) + np.sum(np.sum(ap_selection, axis=1) > 0) * network.circuit_power_per_ap
-        ee = (mean_rate * 1e6) / total_power if total_power > 0 else 0
-        qos = 100.0 * np.mean(rates_mbps >= qos_threshold)
-        active_aps = int(np.sum(np.sum(ap_selection, axis=1) > 0))
-
-        all_rates.append(mean_rate)
-        all_ee.append(ee)
-        all_qos.append(qos)
-        all_active_aps.append(active_aps)
-
-    results = {
-        'strategy': strategy_name,
-        'mean_rate': float(np.mean(all_rates)),
-        'mean_ee': float(np.mean(all_ee)),
-        'mean_qos': float(np.mean(all_qos)),
-        'mean_active_aps': float(np.mean(all_active_aps)),
-        'association_matrix': ap_selection
+def evaluate_baselines(network, n_episodes=20):
+    """Evaluate baseline strategies"""
+    strategies = {
+        'Nearest AP': BaselineStrategies.nearest_ap_max_power,
+        'Equal Power': BaselineStrategies.equal_power_all_serve,
+        'Load Balancing': BaselineStrategies.load_balancing
     }
+
+    results = {}
+
+    for strategy_name, strategy_func in strategies.items():
+        print(f"\nEvaluating baseline: {strategy_name}...")
+
+        all_ee = []
+        all_qos = []
+        all_rates = []
+        all_sinr = []
+        all_active_aps = []
+
+        for episode in range(n_episodes):
+            # Generate channel
+            channel_matrix = network.generate_channel_matrix(batch_size=1)
+
+            # Get allocation
+            power_allocation, ap_association = strategy_func(network, channel_matrix)
+
+            # Calculate metrics
+            sinr, rates = network.calculate_sinr_and_rate(
+                channel_matrix, power_allocation, ap_association
+            )
+            ee = network.calculate_energy_efficiency(rates, power_allocation, ap_association)
+            qos_requirements = np.ones(network.num_users) * 5e6
+            qos_sat = network.calculate_qos_satisfaction(rates, qos_requirements)
+
+            # Store
+            all_ee.append(ee.numpy()[0])
+            all_qos.append(qos_sat.numpy()[0])
+            all_rates.append(np.mean(rates.numpy()) / 1e6)
+            all_sinr.append(10 * np.log10(np.mean(sinr.numpy())))
+            all_active_aps.append(np.sum(np.sum(ap_association, axis=1) > 0))
+
+        results[strategy_name] = {
+            'mean_energy_efficiency': np.mean(all_ee),
+            'std_energy_efficiency': np.std(all_ee),
+            'mean_qos_satisfaction': np.mean(all_qos),
+            'std_qos_satisfaction': np.std(all_qos),
+            'mean_rate_mbps': np.mean(all_rates),
+            'std_rate_mbps': np.std(all_rates),
+            'mean_sinr_db': np.mean(all_sinr),
+            'std_sinr_db': np.std(all_sinr),
+            'mean_active_aps': np.mean(all_active_aps),
+            'std_active_aps': np.std(all_active_aps),
+            'association_matrix': ap_association
+        }
+
+        print(f"  - Energy Efficiency: {results[strategy_name]['mean_energy_efficiency']:.2e} bits/Joule")
+        print(f"  - QoS Satisfaction: {results[strategy_name]['mean_qos_satisfaction']:.2f}%")
+        print(f"  - Avg Rate: {results[strategy_name]['mean_rate_mbps']:.2f} Mbps")
 
     return results
 
 
+def print_results_table(rl_results, baseline_results):
+    """Print formatted results table"""
+    print("\n" + "="*120)
+    print("EVALUATION RESULTS TABLE")
+    print("="*120)
+
+    all_strategies = ['RL Agent'] + list(baseline_results.keys())
+    all_results = {'RL Agent': rl_results, **baseline_results}
+
+    # Header
+    print(f"\n{'Strategy':<20} {'EE (bits/J)':<20} {'Rate (Mbps)':<15} {'QoS (%)':<12} {'SINR (dB)':<12} {'Active APs':<12}")
+    print("-" * 120)
+
+    # Data rows
+    for strategy in all_strategies:
+        r = all_results[strategy]
+        ee_str = f"{r['mean_energy_efficiency']:.2e} ± {r['std_energy_efficiency']:.2e}"
+        rate_str = f"{r['mean_rate_mbps']:.2f} ± {r['std_rate_mbps']:.2f}"
+        qos_str = f"{r['mean_qos_satisfaction']:.1f} ± {r['std_qos_satisfaction']:.1f}"
+        sinr_str = f"{r['mean_sinr_db']:.2f} ± {r['std_sinr_db']:.2f}"
+
+        if 'mean_active_aps' in r:
+            aps_str = f"{r['mean_active_aps']:.1f} ± {r['std_active_aps']:.1f}"
+        else:
+            aps_str = "N/A"
+
+        print(f"{strategy:<20} {ee_str:<20} {rate_str:<15} {qos_str:<12} {sinr_str:<12} {aps_str:<12}")
+
+    print("="*120)
+
+
+def calculate_improvements(rl_results, baseline_results):
+    """Calculate and print improvement percentages"""
+    print("\n" + "="*80)
+    print("PERFORMANCE IMPROVEMENTS")
+    print("="*80)
+
+    rl_ee = rl_results['mean_energy_efficiency']
+    rl_rate = rl_results['mean_rate_mbps']
+    rl_qos = rl_results['mean_qos_satisfaction']
+
+    for strategy_name, baseline_result in baseline_results.items():
+        baseline_ee = baseline_result['mean_energy_efficiency']
+        baseline_rate = baseline_result['mean_rate_mbps']
+        baseline_qos = baseline_result['mean_qos_satisfaction']
+
+        ee_improvement = ((rl_ee - baseline_ee) / baseline_ee) * 100
+        rate_improvement = ((rl_rate - baseline_rate) / baseline_rate) * 100
+        qos_improvement = rl_qos - baseline_qos
+
+        print(f"\nRL Agent vs {strategy_name}:")
+        print(f"  - Energy Efficiency Improvement: {ee_improvement:+.2f}%")
+        print(f"  - Rate Improvement: {rate_improvement:+.2f}%")
+        print(f"  - QoS Improvement: {qos_improvement:+.2f} percentage points")
+
+        if ee_improvement > 0:
+            print(f"  ✓ RL Agent is MORE energy efficient")
+        else:
+            print(f"  ✗ RL Agent is LESS energy efficient")
+
+    print("="*80)
+
+
 # ============================================================================
-# MODE 1: BASIC EVALUATION
+# EVALUATION MODE
 # ============================================================================
 
-def mode_evaluate(args):
-    """Basic evaluation with visualizations"""
+def evaluate_network(args):
+    """Network evaluation with comprehensive visualizations and baseline comparison"""
     print("="*80)
-    print("MODE: BASIC EVALUATION")
+    print("NETWORK EVALUATION")
     print("="*80)
+
+    # Load configuration
+    with open(args.config, 'r') as f:
+        config = yaml.safe_load(f)
 
     # Create environment
-    env = CellFreeEnv(
-        num_aps=args.num_aps,
-        num_users=args.num_users,
-        qos_min_rate_mbps=5.0,
-        qos_weight=10.0,
-        episode_length=100,
-        action_type='discrete'
-    )
-    env.network.circuit_power_per_ap = args.circuit_power
+    env = CellFreeEnv(config_path=args.config, render_mode=None)
 
     # Create results directory
     os.makedirs('results/evaluate', exist_ok=True)
@@ -282,13 +477,12 @@ def mode_evaluate(args):
     print("\n📍 Generating network topology...")
     plot_network_topology(
         env.network,
-        title=f"Network Topology ({args.num_aps} APs, {args.num_users} Users)",
+        title=f"Network Topology ({env.num_aps} APs, {env.num_users} Users)",
         save_path='results/evaluate/topology.png'
     )
 
     # 2. Plot channel gain matrix
     print("\n📶 Generating channel gain matrix...")
-    # Get large-scale channel gains (path loss) from the network
     channel_gain = env.network.calculate_pathloss().numpy()
     plot_channel_gain_matrix(
         channel_gain,
@@ -300,22 +494,21 @@ def mode_evaluate(args):
     if args.model:
         print("\n🤖 Evaluating RL Agent...")
 
-        # Auto-detect agent type from model filename or path
+        # Auto-detect agent type
         if 'ppo' in args.model.lower():
             print("  Detected: PPO agent")
-            from agents.ppo_agent import PPOAgent
             agent = PPOAgent(env=env, verbose=0)
         else:
             print("  Detected: DQN agent")
             agent = DQNAgent(env=env, verbose=0)
 
         agent.load(args.model)
-        rl_results = evaluate_rl_agent(env, agent, n_episodes=args.episodes)
+        rl_results = safe_evaluate_rl_agent(agent, env, n_episodes=args.episodes)
 
         print(f"\n  Mean Reward: {rl_results['mean_reward']:.2f}")
-        print(f"  Mean Rate: {rl_results['mean_rate']:.2f} Mbps")
-        print(f"  Mean EE: {rl_results['mean_ee']:.2e} bits/J")
-        print(f"  Mean QoS: {rl_results['mean_qos']:.1f}%")
+        print(f"  Mean Rate: {rl_results['mean_rate_mbps']:.2f} Mbps")
+        print(f"  Mean EE: {rl_results['mean_energy_efficiency']:.2e} bits/J")
+        print(f"  Mean QoS: {rl_results['mean_qos_satisfaction']:.1f}%")
         print(f"  Mean Active APs: {rl_results['mean_active_aps']:.1f}")
 
         # Plot RL association
@@ -326,382 +519,54 @@ def mode_evaluate(args):
                 save_path='results/evaluate/association_rl.png'
             )
 
-    # 4. Evaluate baselines
+    # 4. Evaluate and compare with baselines
     print("\n📊 Evaluating Baselines...")
-    baselines = {
-        'Nearest AP': BaselineStrategies.nearest_ap_max_power,
-        'Equal Power': BaselineStrategies.equal_power_all_serve,
-        'Load Balancing': BaselineStrategies.load_balancing
-    }
+    baseline_results = evaluate_baselines(env.network, n_episodes=args.episodes)
 
-    for name, func in baselines.items():
-        results = evaluate_baseline(env.network, func, name, n_episodes=args.episodes)
+    for name, res in baseline_results.items():
         print(f"\n  {name}:")
-        print(f"    Rate: {results['mean_rate']:.2f} Mbps")
-        print(f"    EE: {results['mean_ee']:.2e} bits/J")
-        print(f"    QoS: {results['mean_qos']:.1f}%")
-        print(f"    Active APs: {results['mean_active_aps']:.1f}")
+        print(f"    Rate: {res['mean_rate_mbps']:.2f} Mbps")
+        print(f"    EE: {res['mean_energy_efficiency']:.2e} bits/J")
+        print(f"    QoS: {res['mean_qos_satisfaction']:.1f}%")
+        print(f"    Active APs: {res['mean_active_aps']:.1f}")
 
         # Plot association
         safe_name = name.replace(' ', '_').replace('+', '').lower()
         plot_ap_user_association(
-            results['association_matrix'],
+            res['association_matrix'],
             strategy_name=name,
             save_path=f'results/evaluate/association_{safe_name}.png'
         )
 
+    # 5. Generate comparison plots if RL agent is evaluated
+    if args.model:
+        print("\n📈 Generating comparison plots...")
+        print_results_table(rl_results, baseline_results)
+        calculate_improvements(rl_results, baseline_results)
+        plot_comprehensive_comparison(rl_results, baseline_results, 'results/evaluate')
+
+        # Save results to JSON
+        results_file = 'results/evaluate/evaluation_results.json'
+        all_results = {'RL Agent': rl_results, **baseline_results}
+
+        # Convert numpy types to native Python types
+        def convert_to_native(obj):
+            if isinstance(obj, dict):
+                return {k: convert_to_native(v) for k, v in obj.items()}
+            elif isinstance(obj, (np.integer, np.floating)):
+                return float(obj)
+            elif isinstance(obj, np.ndarray):
+                return obj.tolist()
+            return obj
+
+        all_results_native = convert_to_native(all_results)
+
+        with open(results_file, 'w') as f:
+            json.dump(all_results_native, f, indent=2)
+
+        print(f"✓ Results saved to: {results_file}")
+
     print("\n✅ Evaluation complete! Check results/evaluate/ directory")
-
-
-# ============================================================================
-# MODE 2: CIRCUIT POWER SENSITIVITY
-# ============================================================================
-
-def mode_circuit_power(args):
-    """Circuit power sensitivity analysis"""
-    print("="*80)
-    print("MODE: CIRCUIT POWER SENSITIVITY")
-    print("="*80)
-
-    circuit_powers = [0.1, 0.2, 0.5]  # 100mW, 200mW, 500mW
-    labels = ['100mW', '200mW', '500mW']
-
-    os.makedirs('results/circuit_power', exist_ok=True)
-
-    # Storage
-    results_data = {name: {'ee': [], 'rate': [], 'active_aps': []}
-                    for name in ['RL Agent', 'Nearest AP', 'Equal Power', 'Load Balancing']}
-
-    for cp_idx, circuit_power in enumerate(circuit_powers):
-        print(f"\n{'='*60}")
-        print(f"Testing Circuit Power: {labels[cp_idx]}")
-        print(f"{'='*60}")
-
-        # Create environment
-        env = CellFreeEnv(
-            num_aps=args.num_aps,
-            num_users=args.num_users,
-            qos_min_rate_mbps=5.0,
-            qos_weight=10.0,
-            episode_length=100,
-            action_type='discrete'
-        )
-        env.network.circuit_power_per_ap = circuit_power
-
-        # Test RL
-        if args.model:
-            # Auto-detect agent type
-            if 'ppo' in args.model.lower():
-                from agents.ppo_agent import PPOAgent
-                agent = PPOAgent(env=env, verbose=0)
-            else:
-                agent = DQNAgent(env=env, verbose=0)
-            agent.load(args.model)
-            rl_res = evaluate_rl_agent(env, agent, n_episodes=args.episodes)
-            results_data['RL Agent']['ee'].append(rl_res['mean_ee'])
-            results_data['RL Agent']['rate'].append(rl_res['mean_rate'])
-            results_data['RL Agent']['active_aps'].append(rl_res['mean_active_aps'])
-            print(f"  RL Agent: Rate={rl_res['mean_rate']:.2f} Mbps, EE={rl_res['mean_ee']:.2e}")
-
-        # Test baselines
-        baselines = {
-            'Nearest AP': BaselineStrategies.nearest_ap_max_power,
-            'Equal Power': BaselineStrategies.equal_power_all_serve,
-            'Load Balancing': BaselineStrategies.load_balancing
-        }
-
-        for name, func in baselines.items():
-            res = evaluate_baseline(env.network, func, name, n_episodes=args.episodes)
-            results_data[name]['ee'].append(res['mean_ee'])
-            results_data[name]['rate'].append(res['mean_rate'])
-            results_data[name]['active_aps'].append(res['mean_active_aps'])
-            print(f"  {name}: Rate={res['mean_rate']:.2f} Mbps, EE={res['mean_ee']:.2e}")
-
-    # Plot comparison
-    fig, axes = plt.subplots(1, 3, figsize=(18, 5))
-    fig.suptitle('Circuit Power Sensitivity Analysis', fontsize=16, fontweight='bold')
-
-    colors = {'RL Agent': '#FFD93D', 'Nearest AP': '#2E86AB',
-              'Equal Power': '#A23B72', 'Load Balancing': '#F18F01'}
-    markers = {'RL Agent': 'D', 'Nearest AP': 'o',
-               'Equal Power': 's', 'Load Balancing': '^'}
-
-    # Plot 1: Energy Efficiency
-    ax = axes[0]
-    for name, data in results_data.items():
-        if data['ee']:
-            ax.plot(circuit_powers, data['ee'], marker=markers.get(name, 'o'),
-                   color=colors.get(name, 'gray'), linewidth=2, markersize=8, label=name)
-    ax.set_xlabel('Circuit Power (W)', fontsize=12)
-    ax.set_ylabel('Energy Efficiency (bits/J)', fontsize=12)
-    ax.set_title('Energy Efficiency vs Circuit Power', fontweight='bold')
-    ax.legend()
-    ax.grid(alpha=0.3)
-
-    # Plot 2: Data Rate
-    ax = axes[1]
-    for name, data in results_data.items():
-        if data['rate']:
-            ax.plot(circuit_powers, data['rate'], marker=markers.get(name, 'o'),
-                   color=colors.get(name, 'gray'), linewidth=2, markersize=8, label=name)
-    ax.set_xlabel('Circuit Power (W)', fontsize=12)
-    ax.set_ylabel('Average Rate (Mbps)', fontsize=12)
-    ax.set_title('Data Rate vs Circuit Power', fontweight='bold')
-    ax.legend()
-    ax.grid(alpha=0.3)
-
-    # Plot 3: Active APs
-    ax = axes[2]
-    for name, data in results_data.items():
-        if data['active_aps']:
-            ax.plot(circuit_powers, data['active_aps'], marker=markers.get(name, 'o'),
-                   color=colors.get(name, 'gray'), linewidth=2, markersize=8, label=name)
-    ax.set_xlabel('Circuit Power (W)', fontsize=12)
-    ax.set_ylabel('Active APs', fontsize=12)
-    ax.set_title('Active APs vs Circuit Power', fontweight='bold')
-    ax.legend()
-    ax.grid(alpha=0.3)
-
-    plt.tight_layout()
-    plt.savefig('results/circuit_power/comparison.png', dpi=300, bbox_inches='tight')
-    print("\n✓ Saved comparison plot: results/circuit_power/comparison.png")
-
-    print("\n✅ Circuit power analysis complete!")
-
-
-# ============================================================================
-# MODE 3: AP SCALING
-# ============================================================================
-
-def mode_ap_scaling(args):
-    """AP scaling analysis"""
-    print("="*80)
-    print("MODE: AP SCALING ANALYSIS")
-    print("="*80)
-
-    ap_configs = [16, 25, 36, 49, 64]
-    os.makedirs('results/ap_scaling', exist_ok=True)
-
-    # Storage
-    results_data = {name: {'ee': [], 'rate': [], 'active_aps': []}
-                    for name in ['RL Agent', 'Nearest AP', 'Equal Power', 'Load Balancing']}
-
-    for num_aps in ap_configs:
-        print(f"\n{'='*60}")
-        print(f"Testing {num_aps} APs")
-        print(f"{'='*60}")
-
-        # Create environment
-        env = CellFreeEnv(
-            num_aps=num_aps,
-            num_users=args.num_users,
-            qos_min_rate_mbps=5.0,
-            qos_weight=10.0,
-            episode_length=100,
-            action_type='discrete'
-        )
-        env.network.circuit_power_per_ap = args.circuit_power
-
-        # Visualizations for this config
-        plot_network_topology(
-            env.network,
-            title=f"Network Topology ({num_aps} APs, {args.num_users} Users)",
-            save_path=f'results/ap_scaling/topology_{num_aps}aps.png'
-        )
-
-        # Test RL (if model trained for this config)
-        if args.model and num_aps == 25:  # Assuming model trained for 25 APs
-            # Auto-detect agent type
-            if 'ppo' in args.model.lower():
-                from agents.ppo_agent import PPOAgent
-                agent = PPOAgent(env=env, verbose=0)
-            else:
-                agent = DQNAgent(env=env, verbose=0)
-            agent.load(args.model)
-            rl_res = evaluate_rl_agent(env, agent, n_episodes=args.episodes)
-            results_data['RL Agent']['ee'].append(rl_res['mean_ee'])
-            results_data['RL Agent']['rate'].append(rl_res['mean_rate'])
-            results_data['RL Agent']['active_aps'].append(rl_res['mean_active_aps'])
-            print(f"  RL Agent: Rate={rl_res['mean_rate']:.2f} Mbps")
-
-        # Test baselines
-        baselines = {
-            'Nearest AP': BaselineStrategies.nearest_ap_max_power,
-            'Equal Power': BaselineStrategies.equal_power_all_serve,
-            'Load Balancing': BaselineStrategies.load_balancing
-        }
-
-        for name, func in baselines.items():
-            res = evaluate_baseline(env.network, func, name, n_episodes=args.episodes)
-            results_data[name]['ee'].append(res['mean_ee'])
-            results_data[name]['rate'].append(res['mean_rate'])
-            results_data[name]['active_aps'].append(res['mean_active_aps'])
-            print(f"  {name}: Rate={res['mean_rate']:.2f} Mbps")
-
-    # Plot comparison
-    fig, axes = plt.subplots(2, 3, figsize=(18, 10))
-    fig.suptitle('Network Performance vs Number of Access Points', fontsize=16, fontweight='bold')
-
-    colors = {'RL Agent': '#FFD93D', 'Nearest AP': '#2E86AB',
-              'Equal Power': '#A23B72', 'Load Balancing': '#F18F01'}
-    markers = {'RL Agent': 'D', 'Nearest AP': 'o',
-               'Equal Power': 's', 'Load Balancing': '^'}
-
-    # Energy Efficiency
-    ax = axes[0, 2]
-    for name, data in results_data.items():
-        if data['ee']:
-            x_values = ap_configs[:len(data['ee'])]
-            ax.plot(x_values, data['ee'], marker=markers.get(name, 'o'),
-                   color=colors.get(name, 'gray'), linewidth=2, markersize=8, label=name)
-    ax.set_xlabel('Number of APs', fontsize=11)
-    ax.set_ylabel('Energy Efficiency (bits/J)', fontsize=11)
-    ax.set_title('Energy Efficiency', fontweight='bold')
-    ax.legend()
-    ax.grid(alpha=0.3)
-
-    # Rate
-    ax = axes[0, 0]
-    for name, data in results_data.items():
-        if data['rate']:
-            x_values = ap_configs[:len(data['rate'])]
-            ax.plot(x_values, data['rate'], marker=markers.get(name, 'o'),
-                   color=colors.get(name, 'gray'), linewidth=2, markersize=8, label=name)
-    ax.set_xlabel('Number of APs', fontsize=11)
-    ax.set_ylabel('Average Rate (Mbps)', fontsize=11)
-    ax.set_title('Average Rate per User', fontweight='bold')
-    ax.legend()
-    ax.grid(alpha=0.3)
-
-    plt.tight_layout()
-    plt.savefig('results/ap_scaling/comparison.png', dpi=300, bbox_inches='tight')
-    print("\n✓ Saved comparison plot: results/ap_scaling/comparison.png")
-
-    print("\n✅ AP scaling analysis complete!")
-
-
-# ============================================================================
-# MODE 4: USER SCALING
-# ============================================================================
-
-def mode_user_scaling(args):
-    """User scaling analysis"""
-    print("="*80)
-    print("MODE: USER SCALING ANALYSIS")
-    print("="*80)
-
-    user_configs = [10, 16, 25]
-    os.makedirs('results/user_scaling', exist_ok=True)
-
-    # Storage
-    results_data = {name: {'ee': [], 'rate': [], 'active_aps': []}
-                    for name in ['RL Agent', 'Nearest AP', 'Equal Power', 'Load Balancing']}
-
-    for num_users in user_configs:
-        print(f"\n{'='*60}")
-        print(f"Testing {num_users} Users")
-        print(f"{'='*60}")
-
-        # Create environment
-        env = CellFreeEnv(
-            num_aps=args.num_aps,
-            num_users=num_users,
-            qos_min_rate_mbps=5.0,
-            qos_weight=10.0,
-            episode_length=100,
-            action_type='discrete'
-        )
-        env.network.circuit_power_per_ap = args.circuit_power
-
-        # Visualizations for this config
-        plot_network_topology(
-            env.network,
-            title=f"Network Topology ({args.num_aps} APs, {num_users} Users)",
-            save_path=f'results/user_scaling/topology_{num_users}users.png'
-        )
-
-        # Test RL (if model trained for this config)
-        if args.model and num_users == 10:  # Assuming model trained for 10 users
-            # Auto-detect agent type
-            if 'ppo' in args.model.lower():
-                from agents.ppo_agent import PPOAgent
-                agent = PPOAgent(env=env, verbose=0)
-            else:
-                agent = DQNAgent(env=env, verbose=0)
-            agent.load(args.model)
-            rl_res = evaluate_rl_agent(env, agent, n_episodes=args.episodes)
-            results_data['RL Agent']['ee'].append(rl_res['mean_ee'])
-            results_data['RL Agent']['rate'].append(rl_res['mean_rate'])
-            results_data['RL Agent']['active_aps'].append(rl_res['mean_active_aps'])
-            print(f"  RL Agent: Rate={rl_res['mean_rate']:.2f} Mbps")
-
-        # Test baselines
-        baselines = {
-            'Nearest AP': BaselineStrategies.nearest_ap_max_power,
-            'Equal Power': BaselineStrategies.equal_power_all_serve,
-            'Load Balancing': BaselineStrategies.load_balancing
-        }
-
-        for name, func in baselines.items():
-            res = evaluate_baseline(env.network, func, name, n_episodes=args.episodes)
-            results_data[name]['ee'].append(res['mean_ee'])
-            results_data[name]['rate'].append(res['mean_rate'])
-            results_data[name]['active_aps'].append(res['mean_active_aps'])
-            print(f"  {name}: Rate={res['mean_rate']:.2f} Mbps")
-
-    # Plot comparison
-    fig, axes = plt.subplots(1, 3, figsize=(18, 5))
-    fig.suptitle('Network Performance vs Number of Users', fontsize=16, fontweight='bold')
-
-    colors = {'RL Agent': '#FFD93D', 'Nearest AP': '#2E86AB',
-              'Equal Power': '#A23B72', 'Load Balancing': '#F18F01'}
-    markers = {'RL Agent': 'D', 'Nearest AP': 'o',
-               'Equal Power': 's', 'Load Balancing': '^'}
-
-    # Energy Efficiency
-    ax = axes[2]
-    for name, data in results_data.items():
-        if data['ee']:
-            x_values = user_configs[:len(data['ee'])]
-            ax.plot(x_values, data['ee'], marker=markers.get(name, 'o'),
-                   color=colors.get(name, 'gray'), linewidth=2, markersize=8, label=name)
-    ax.set_xlabel('Number of Users', fontsize=12)
-    ax.set_ylabel('Energy Efficiency (bits/J)', fontsize=12)
-    ax.set_title('Energy Efficiency', fontweight='bold')
-    ax.legend()
-    ax.grid(alpha=0.3)
-
-    # Rate
-    ax = axes[0]
-    for name, data in results_data.items():
-        if data['rate']:
-            x_values = user_configs[:len(data['rate'])]
-            ax.plot(x_values, data['rate'], marker=markers.get(name, 'o'),
-                   color=colors.get(name, 'gray'), linewidth=2, markersize=8, label=name)
-    ax.set_xlabel('Number of Users', fontsize=12)
-    ax.set_ylabel('Average Rate (Mbps)', fontsize=12)
-    ax.set_title('Average Rate per User', fontweight='bold')
-    ax.legend()
-    ax.grid(alpha=0.3)
-
-    # Active APs
-    ax = axes[1]
-    for name, data in results_data.items():
-        if data['active_aps']:
-            x_values = user_configs[:len(data['active_aps'])]
-            ax.plot(x_values, data['active_aps'], marker=markers.get(name, 'o'),
-                   color=colors.get(name, 'gray'), linewidth=2, markersize=8, label=name)
-    ax.set_xlabel('Number of Users', fontsize=12)
-    ax.set_ylabel('Active APs', fontsize=12)
-    ax.set_title('Active APs', fontweight='bold')
-    ax.legend()
-    ax.grid(alpha=0.3)
-
-    plt.tight_layout()
-    plt.savefig('results/user_scaling/comparison.png', dpi=300, bbox_inches='tight')
-    print("\n✓ Saved comparison plot: results/user_scaling/comparison.png")
-
-    print("\n✅ User scaling analysis complete!")
 
 
 # ============================================================================
@@ -710,37 +575,27 @@ def mode_user_scaling(args):
 
 def parse_args():
     parser = argparse.ArgumentParser(
-        description='Unified Network Analysis Tool',
+        description='Network Analysis Tool - Comprehensive evaluation and visualization',
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  # Basic evaluation
-  python src/analyze_network.py --mode evaluate --model experiments/exp_20251210_230304/models/dqn_cellfree_final
+  # Evaluate with RL model
+  python src/analyze_network.py --model MODEL_PATH --config configs/default.yaml
 
-  # Circuit power sensitivity
-  python src/analyze_network.py --mode circuit-power --model MODEL_PATH
+  # Evaluate baselines only (no RL model)
+  python src/analyze_network.py --config configs/default.yaml
 
-  # AP scaling
-  python src/analyze_network.py --mode ap-scaling --model MODEL_PATH
-
-  # User scaling
-  python src/analyze_network.py --mode user-scaling --model MODEL_PATH
+  # Custom evaluation episodes
+  python src/analyze_network.py --model MODEL_PATH --config configs/default.yaml --episodes 50
         """
     )
 
-    parser.add_argument('--mode', type=str, required=True,
-                       choices=['evaluate', 'circuit-power', 'ap-scaling', 'user-scaling'],
-                       help='Analysis mode')
     parser.add_argument('--model', type=str, default=None,
-                       help='Path to trained RL model')
-    parser.add_argument('--num-aps', type=int, default=25,
-                       help='Number of APs (default: 25)')
-    parser.add_argument('--num-users', type=int, default=10,
-                       help='Number of users (default: 10)')
-    parser.add_argument('--circuit-power', type=float, default=0.2,
-                       help='Circuit power per AP in Watts (default: 0.2)')
-    parser.add_argument('--episodes', type=int, default=10,
-                       help='Number of evaluation episodes (default: 10)')
+                       help='Path to trained RL model (optional - if not provided, only baselines will be evaluated)')
+    parser.add_argument('--config', type=str, default='configs/default.yaml',
+                       help='Path to config file (default: configs/default.yaml)')
+    parser.add_argument('--episodes', type=int, default=20,
+                       help='Number of evaluation episodes (default: 20)')
 
     return parser.parse_args()
 
@@ -749,25 +604,18 @@ def main():
     args = parse_args()
 
     print("\n" + "="*80)
-    print("UNIFIED NETWORK ANALYSIS TOOL")
+    print("NETWORK ANALYSIS TOOL")
     print("="*80)
-    print(f"Mode: {args.mode}")
-    print(f"APs: {args.num_aps}, Users: {args.num_users}")
-    print(f"Circuit Power: {args.circuit_power*1000:.0f} mW")
+    print(f"Config: {args.config}")
     print(f"Episodes: {args.episodes}")
     if args.model:
         print(f"RL Model: {args.model}")
+    else:
+        print("RL Model: None (baselines only)")
     print("="*80)
 
-    # Route to appropriate mode
-    if args.mode == 'evaluate':
-        mode_evaluate(args)
-    elif args.mode == 'circuit-power':
-        mode_circuit_power(args)
-    elif args.mode == 'ap-scaling':
-        mode_ap_scaling(args)
-    elif args.mode == 'user-scaling':
-        mode_user_scaling(args)
+    # Run evaluation
+    evaluate_network(args)
 
     print("\n" + "="*80)
     print("ANALYSIS COMPLETE")

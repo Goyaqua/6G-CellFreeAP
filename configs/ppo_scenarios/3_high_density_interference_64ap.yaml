@@ -1,0 +1,73 @@
+# 📶 SCENARIO 3: HIGH DENSITY - Interference Management & Fairness
+# 64 APs, 32 Users, Rate-Dominant with Fairness
+#
+# Scientific Goal: Test interference management and fair allocation under congestion
+# Expected: ~50-60 active APs, ~20-40 Mbps/user, minimal QoS violations
+#
+# Reward Balance: rate×0.08 ≈ 3.2 points | power×5.0 ≈ 2.5 points | Ratio 3.2:2.5 (Rate slightly wins) ✅
+
+network:
+  num_aps: 64                      # All APs may be needed
+  num_users: 32                    # High user density (congested)
+  num_antennas_per_ap: 1
+  area_size: 500.0
+  carrier_frequency: 3.5e9
+  bandwidth: 10e6
+  max_power_per_ap: 0.2
+  noise_power_dbm: -94
+  circuit_power_per_ap: 0.2
+
+environment:
+  qos_min_rate_mbps: 5.0
+
+  # 📶 RATE-DOMINANT WITH FAIRNESS (High Density Priority)
+  rate_weight: 0.08                # log_sum_rate (40) × 0.08 = 3.2 points
+  power_penalty_weight: 5.0        # normalized_power (0.5) × 5.0 = 2.5 points (Ratio 3.2:2.5)
+  qos_weight: 6.0                  # Strict QoS (many users competing)
+  fairness_weight: 5.0             # Fairness critical (avoid user starvation)
+
+  episode_length: 50
+  action_type: 'discrete'
+  num_power_levels: 5
+  randomize_circuit_power: true
+  circuit_power_range: [0.1, 0.5]
+
+training:
+  total_timesteps: 250000          # Extra timesteps for complex scenario
+  eval_freq: 10000
+  save_freq: 25000
+  n_eval_episodes: 5
+
+  ppo:
+    learning_rate: 0.0003
+    n_steps: 2048
+    batch_size: 256
+    n_epochs: 10
+    gamma: 0.99
+    gae_lambda: 0.95
+    clip_range: 0.2
+    ent_coef: 0.05
+    vf_coef: 0.5
+    max_grad_norm: 0.5
+
+evaluation:
+  n_episodes: 100
+  baseline_strategies:
+    - 'nearest_max'
+    - 'equal_all'
+    - 'load_balance'
+    - 'wmmse'
+
+output:
+  results_dir: './results'
+  logs_dir: './logs'
+  plots_dir: './plots'
+  tensorboard_log: './tensorboard'
+  save_models: true
+  save_plots: true
+  verbose: 1
+
+seed:
+  env_seed: 42
+  agent_seed: 42
+  eval_seed: 123

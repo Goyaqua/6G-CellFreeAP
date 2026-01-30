@@ -1,0 +1,73 @@
+# 🚀 SCENARIO 4: QoS PRIORITY - Maximum Performance Upper Bound
+# 64 APs, 16 Users, Rate-Overwhelming Rewards
+#
+# Scientific Goal: Demonstrate maximum achievable rate when energy is secondary
+# Expected: ~55-64 active APs (all resources used), ~80-120 Mbps/user, low EE
+#
+# Reward Balance: rate×0.10 ≈ 4 points | power×2.0 ≈ 1 point | Ratio 4:1 (Rate dominant) ✅
+
+network:
+  num_aps: 64                      # All APs available for max performance
+  num_users: 16                    # Standard load
+  num_antennas_per_ap: 1
+  area_size: 500.0
+  carrier_frequency: 3.5e9
+  bandwidth: 10e6
+  max_power_per_ap: 0.2
+  noise_power_dbm: -94
+  circuit_power_per_ap: 0.2
+
+environment:
+  qos_min_rate_mbps: 5.0
+
+  # 🚀 RATE-DOMINANT (High Performance Priority)
+  rate_weight: 0.10                # log_sum_rate (40) × 0.10 = 4.0 points
+  power_penalty_weight: 2.0        # normalized_power (0.5) × 2.0 = 1.0 points (Ratio 4:1)
+  qos_weight: 10.0                 # Maximum QoS priority
+  fairness_weight: 0.0             # Performance over fairness
+
+  episode_length: 50
+  action_type: 'discrete'
+  num_power_levels: 5
+  randomize_circuit_power: true
+  circuit_power_range: [0.1, 0.5]
+
+training:
+  total_timesteps: 200000
+  eval_freq: 10000
+  save_freq: 20000
+  n_eval_episodes: 5
+
+  ppo:
+    learning_rate: 0.0003
+    n_steps: 2048
+    batch_size: 256
+    n_epochs: 10
+    gamma: 0.99
+    gae_lambda: 0.95
+    clip_range: 0.2
+    ent_coef: 0.05
+    vf_coef: 0.5
+    max_grad_norm: 0.5
+
+evaluation:
+  n_episodes: 100
+  baseline_strategies:
+    - 'nearest_max'
+    - 'equal_all'
+    - 'load_balance'
+    - 'wmmse'
+
+output:
+  results_dir: './results'
+  logs_dir: './logs'
+  plots_dir: './plots'
+  tensorboard_log: './tensorboard'
+  save_models: true
+  save_plots: true
+  verbose: 1
+
+seed:
+  env_seed: 42
+  agent_seed: 42
+  eval_seed: 123
