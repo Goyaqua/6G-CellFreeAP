@@ -4,6 +4,7 @@ Automatically finds and analyzes all models in results directories
 """
 
 import argparse
+import sys
 from pathlib import Path
 import glob
 from analyze_star_topology_heatmap import analyze_multiple_models, StarTopologyAnalyzer
@@ -137,12 +138,15 @@ Examples:
 
     # Determine which models to analyze
     if args.model:
-        # Single model specified
-        model_paths = [args.model]
-        if not Path(args.model).exists():
+        # Single model specified - try with .zip if not found
+        model_file = Path(args.model)
+        if not model_file.exists() and not model_file.suffix:
+            model_file = Path(args.model + '.zip')
+        if not model_file.exists():
             print(f"Error: Model not found: {args.model}")
             return
-        print(f"Analyzing single model: {args.model}")
+        model_paths = [str(model_file)]
+        print(f"Analyzing single model: {model_file}")
     else:
         # Search directory for models
         print(f"Searching for models in: {args.dir}")
@@ -165,10 +169,7 @@ Examples:
     print(f"  Episode Length: {args.episode_length}")
     print(f"  Output Directory: {args.output}")
 
-    user_input = input("\nProceed with analysis? [Y/n]: ")
-    if user_input.lower() not in ['', 'y', 'yes']:
-        print("Analysis cancelled.")
-        return
+    print("\nProceeding with analysis...")
 
     # Run analysis
     if len(model_paths) == 1:
@@ -195,7 +196,14 @@ Examples:
         print(f"ANALYZING {len(model_paths)} MODELS")
         print("=" * 80)
 
-        analyze_multiple_models(model_paths, output_dir=args.output)
+        analyze_multiple_models(
+            model_paths,
+            output_dir=args.output,
+            num_aps=args.num_aps,
+            num_users=args.num_users,
+            num_episodes=args.num_episodes,
+            episode_length=args.episode_length
+        )
 
     print("\n" + "=" * 80)
     print("ANALYSIS COMPLETE!")

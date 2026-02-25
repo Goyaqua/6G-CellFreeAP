@@ -13,6 +13,8 @@ This script:
 """
 
 import numpy as np
+import matplotlib
+matplotlib.use('Agg')  # Non-interactive backend for headless operation
 import matplotlib.pyplot as plt
 import seaborn as sns
 from pathlib import Path
@@ -22,13 +24,14 @@ import sys
 
 # Add parent directory to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
+sys.path.insert(0, str(Path(__file__).parent))
 
-from src.network.cellfree_network import CellFreeNetworkSionna
+from environment.cellfree_env import CellFreeEnv
 from stable_baselines3 import PPO
 
 
 class StarTopologyAnalyzer:
-    """Analyzer for testing trained models on star topology"""
+    """Analyzer for testing trained models on star topology using CellFreeEnv"""
 
     def __init__(
         self,
@@ -61,13 +64,23 @@ class StarTopologyAnalyzer:
         print(f"Loading model from: {model_path}")
         self.model = PPO.load(model_path)
 
+        # Create environment matching training config
+        self.env = CellFreeEnv(
+            num_aps=num_aps,
+            num_users=num_users,
+            qos_min_rate_mbps=5.0,
+            qos_weight=5.0,
+            episode_length=episode_length,
+            action_type='discrete'
+        )
+
+        # Switch network to star topology
+        self.env.network.reset_topology(topology_mode='star')
+
         # Storage for analysis
         self.ap_activation_counts = np.zeros(num_aps)
         self.ap_power_sum = np.zeros(num_aps)
         self.total_steps = 0
-
-        # Network instance (will be reset for each episode)
-        self.network = None
 
     def run_analysis(self) -> Dict:
         """
@@ -89,20 +102,15 @@ class StarTopologyAnalyzer:
         for ep in range(self.num_episodes):
             print(f"\n[Episode {ep+1}/{self.num_episodes}]")
 
-            # Create network with STAR topology and unique seed for this episode
-            self.network = CellFreeNetworkSionna(
-                num_aps=self.num_aps,
-                num_users=self.num_users,
-                area_size=self.area_size,
-                topology_mode='star',  # Always use star topology
-                seed=42 + ep  # Different seed for each episode
-            )
+            # Reset with unique seed and re-apply star topology
+            seed = 42 + ep
+            self.env.network.reset_topology(topology_mode='star')
 
-            print(f"  Seed: {42 + ep}")
-            print(f"  User positions (first 3): {self.network.user_positions[:3]}")
+            print(f"  Seed: {seed}")
+            print(f"  User positions (first 3): {self.env.network.user_positions[:3]}")
 
             # Run episode
-            ep_reward, ep_rate, ep_ee = self._run_episode()
+            ep_reward, ep_rate, ep_ee = self._run_episode(seed)
 
             episode_rewards.append(ep_reward)
             episode_rates.append(ep_rate)
@@ -117,15 +125,15 @@ class StarTopologyAnalyzer:
             'model_path': self.model_path,
             'num_episodes': self.num_episodes,
             'total_steps': self.total_steps,
-            'ap_activation_frequency': self.ap_activation_counts / self.total_steps,
-            'ap_average_power': self.ap_power_sum / self.total_steps,
+            'ap_activation_frequency': self.ap_activation_counts / max(self.total_steps, 1),
+            'ap_average_power': self.ap_power_sum / max(self.total_steps, 1),
             'episode_rewards': episode_rewards,
             'episode_rates': episode_rates,
             'episode_ee': episode_ee,
-            'mean_reward': np.mean(episode_rewards),
-            'std_reward': np.std(episode_rewards),
-            'mean_rate': np.mean(episode_rates),
-            'mean_ee': np.mean(episode_ee)
+            'mean_reward': float(np.mean(episode_rewards)),
+            'std_reward': float(np.std(episode_rewards)),
+            'mean_rate': float(np.mean(episode_rates)),
+            'mean_ee': float(np.mean(episode_ee))
         }
 
         print("\n" + "=" * 80)
@@ -138,98 +146,57 @@ class StarTopologyAnalyzer:
 
         return results
 
-    def _run_episode(self) -> Tuple[float, float, float]:
+    def _run_episode(self, seed: int) -> Tuple[float, float, float]:
         """
-        Run single episode and collect AP usage statistics
+        Run single episode using CellFreeEnv and collect AP usage statistics
 
         Returns:
             Tuple of (total_reward, avg_rate, avg_ee)
         """
-        # Reset environment (implement your env reset logic here)
-        # For this example, we'll simulate the episode
+        obs, info = self.env.reset(seed=seed)
 
         episode_reward = 0.0
         episode_rate = 0.0
         episode_ee = 0.0
+        steps = 0
 
-        for step in range(self.episode_length):
-            # Get observation (you need to implement this based on your env)
-            obs = self._get_observation()
-
-            # Get action from model
+        done = False
+        while not done:
+            # Get action from trained model
             action, _ = self.model.predict(obs, deterministic=True)
 
-            # Parse action to get power allocation and AP association
-            power_allocation, ap_association = self._parse_action(action)
+            # Step environment
+            obs, reward, terminated, truncated, info = self.env.step(action)
+            done = terminated or truncated
 
-            # Update statistics
-            active_aps = (power_allocation > 0.01).astype(float)  # Threshold for "active"
+            # Extract AP activation from info
+            if 'active_aps' in info:
+                active_count = info['active_aps']
+
+            # Track power allocation from the environment's last action
+            # We need to decode the action to get per-AP power
+            power_allocation, ap_association = self.env._action_to_allocation(action)
+
+            active_aps = (power_allocation > 0.001).astype(float)
             self.ap_activation_counts += active_aps
             self.ap_power_sum += power_allocation
             self.total_steps += 1
 
-            # Calculate reward components (simplified)
-            channel_matrix = self.network.generate_channel_matrix(batch_size=1)
-            sinr, rates = self.network.calculate_sinr_and_rate(
-                channel_matrix, power_allocation, ap_association
-            )
-            ee = self.network.calculate_energy_efficiency(
-                rates, power_allocation, ap_association
-            )
-
             # Accumulate metrics
-            avg_rate = rates.numpy().mean()
-            avg_ee = ee.numpy().mean()
-
-            episode_rate += avg_rate
-            episode_ee += avg_ee
-
-            # Simple reward (you can use your actual reward function)
-            reward = avg_rate / 1e6 + avg_ee / 1e6  # Normalized
             episode_reward += reward
+            if 'avg_rate_mbps' in info:
+                episode_rate += info['avg_rate_mbps'] * 1e6
+            if 'energy_efficiency' in info:
+                episode_ee += info['energy_efficiency']
+
+            steps += 1
 
         # Average over episode
-        episode_rate /= self.episode_length
-        episode_ee /= self.episode_length
+        if steps > 0:
+            episode_rate /= steps
+            episode_ee /= steps
 
         return episode_reward, episode_rate, episode_ee
-
-    def _get_observation(self) -> np.ndarray:
-        """
-        Get observation from network state
-        Implement this based on your environment's observation space
-        """
-        # Placeholder: Create observation based on network state
-        # You should implement this according to your env's observation space
-
-        # Example: distances as observation
-        obs = self.network.distances.flatten()
-        return obs
-
-    def _parse_action(self, action: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
-        """
-        Parse model action to power allocation and AP association
-        Implement this based on your action space
-
-        Returns:
-            power_allocation: (num_aps,) array
-            ap_association: (num_aps, num_users) array
-        """
-        # Placeholder implementation
-        # You should implement this according to your env's action space
-
-        # Example: Simple binary AP activation + power levels
-        if len(action) == self.num_aps:
-            # Binary activation only
-            power_allocation = action * 0.2  # Max 200mW
-            ap_association = np.ones((self.num_aps, self.num_users))
-        else:
-            # Split action into power and association
-            mid = self.num_aps
-            power_allocation = action[:mid] * 0.2
-            ap_association = np.ones((self.num_aps, self.num_users))
-
-        return power_allocation, ap_association
 
     def visualize_heatmaps(self, results: Dict, save_dir: str = "."):
         """
@@ -240,7 +207,7 @@ class StarTopologyAnalyzer:
             save_dir: Directory to save figures
         """
         save_path = Path(save_dir)
-        save_path.mkdir(exist_ok=True)
+        save_path.mkdir(exist_ok=True, parents=True)
 
         # Get grid dimensions for APs
         side_length = int(np.ceil(np.sqrt(self.num_aps)))
@@ -334,7 +301,7 @@ class StarTopologyAnalyzer:
             )
 
         # Plot APs colored by activation frequency
-        ap_positions = self.network.ap_positions
+        ap_positions = self.env.network.ap_positions
         scatter = ax4.scatter(
             ap_positions[:, 0],
             ap_positions[:, 1],
@@ -410,12 +377,12 @@ class StarTopologyAnalyzer:
         plt.savefig(save_file, dpi=300, bbox_inches='tight')
         print(f"\nSaved heatmap: {save_file}")
 
-        plt.show()
+        plt.close()
 
     def save_results(self, results: Dict, save_dir: str = "."):
         """Save analysis results to JSON"""
         save_path = Path(save_dir)
-        save_path.mkdir(exist_ok=True)
+        save_path.mkdir(exist_ok=True, parents=True)
 
         # Convert numpy arrays to lists for JSON serialization
         results_serializable = {
@@ -424,9 +391,9 @@ class StarTopologyAnalyzer:
             'total_steps': results['total_steps'],
             'ap_activation_frequency': results['ap_activation_frequency'].tolist(),
             'ap_average_power': results['ap_average_power'].tolist(),
-            'episode_rewards': results['episode_rewards'],
-            'episode_rates': results['episode_rates'],
-            'episode_ee': results['episode_ee'],
+            'episode_rewards': [float(x) for x in results['episode_rewards']],
+            'episode_rates': [float(x) for x in results['episode_rates']],
+            'episode_ee': [float(x) for x in results['episode_ee']],
             'mean_reward': results['mean_reward'],
             'std_reward': results['std_reward'],
             'mean_rate': results['mean_rate'],
@@ -442,16 +409,22 @@ class StarTopologyAnalyzer:
         print(f"Saved results: {save_file}")
 
 
-def analyze_multiple_models(model_paths: List[str], output_dir: str = "star_topology_analysis"):
+def analyze_multiple_models(model_paths: List[str], output_dir: str = "star_topology_analysis",
+                           num_aps: int = 64, num_users: int = 16,
+                           num_episodes: int = 10, episode_length: int = 100):
     """
     Analyze multiple trained models on star topology
 
     Args:
         model_paths: List of paths to trained models
         output_dir: Directory to save all results
+        num_aps: Number of APs
+        num_users: Number of users
+        num_episodes: Number of test episodes
+        episode_length: Steps per episode
     """
     output_path = Path(output_dir)
-    output_path.mkdir(exist_ok=True)
+    output_path.mkdir(exist_ok=True, parents=True)
 
     print("=" * 80)
     print("MULTI-MODEL STAR TOPOLOGY ANALYSIS")
@@ -469,11 +442,11 @@ def analyze_multiple_models(model_paths: List[str], output_dir: str = "star_topo
         try:
             analyzer = StarTopologyAnalyzer(
                 model_path=model_path,
-                num_aps=64,
-                num_users=16,
+                num_aps=num_aps,
+                num_users=num_users,
                 area_size=500.0,
-                num_episodes=10,
-                episode_length=100
+                num_episodes=num_episodes,
+                episode_length=episode_length
             )
 
             results = analyzer.run_analysis()
@@ -484,6 +457,8 @@ def analyze_multiple_models(model_paths: List[str], output_dir: str = "star_topo
 
         except Exception as e:
             print(f"ERROR analyzing {model_path}: {e}")
+            import traceback
+            traceback.print_exc()
             continue
 
     # Generate comparison summary
@@ -515,7 +490,7 @@ def generate_comparison_summary(all_results: List[Dict], output_dir: str):
 
     # 2. Active APs
     ax = axes[0, 1]
-    active_aps = [np.sum(r['ap_activation_frequency'] > 0.1) for r in all_results]
+    active_aps = [np.sum(np.array(r['ap_activation_frequency']) > 0.1) for r in all_results]
     ax.bar(range(len(model_names)), active_aps, color='lightgreen', edgecolor='black')
     ax.set_xticks(range(len(model_names)))
     ax.set_xticklabels(model_names, rotation=45, ha='right')
@@ -550,7 +525,7 @@ def generate_comparison_summary(all_results: List[Dict], output_dir: str):
     save_file = Path(output_dir) / 'model_comparison_star_topology.png'
     plt.savefig(save_file, dpi=300, bbox_inches='tight')
     print(f"\nSaved comparison figure: {save_file}")
-    plt.show()
+    plt.close()
 
 
 if __name__ == '__main__':
@@ -583,11 +558,3 @@ if __name__ == '__main__':
     results = analyzer.run_analysis()
     analyzer.visualize_heatmaps(results)
     analyzer.save_results(results)
-
-    # Example: Analyze multiple models
-    # model_paths = [
-    #     "results/scenario_1/best_model.zip",
-    #     "results/scenario_2/best_model.zip",
-    #     "results/scenario_3/best_model.zip",
-    # ]
-    # analyze_multiple_models(model_paths, output_dir="star_topology_analysis")

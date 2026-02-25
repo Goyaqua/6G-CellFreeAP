@@ -114,12 +114,12 @@ analyze_circuit_power() {
         local log_file="${output_dir}/circuit_${circuit_power}W.log"
 
         if python src/circuit_power_analyze.py \
-            --model "${model_path}" \
+            --rl-model "${model_path}" \
+            --agent-type ppo \
             --num-aps 64 \
             --num-users ${num_users} \
-            --circuit-power ${circuit_power} \
+            --circuit-powers ${circuit_power} \
             --episodes 50 \
-            --output "${output_dir}" \
             > "${log_file}" 2>&1; then
 
             print_success "  ✓ Circuit power ${circuit_power}W analyzed"

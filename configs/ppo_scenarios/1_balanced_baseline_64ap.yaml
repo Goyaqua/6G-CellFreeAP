@@ -2,9 +2,9 @@
 # 64 APs, 16 Users, Mathematically Balanced Rewards
 #
 # Scientific Goal: Demonstrate balanced RL approach for cell-free networks
-# Expected: ~20-25 active APs, ~50-80 Mbps avg rate, high energy efficiency
+# Expected: ~24-32 active APs (1.5-2x AP/user), ~50-80 Mbps avg rate, high energy efficiency
 #
-# Reward Balance: rate×0.03 ≈ 1.2 points | power×15.0 ≈ 7.5 points | Ratio 1.2:7.5 ✅ (Power Wins!)
+# Reward Balance: rate×0.05 ≈ 3.2 points | power×5.0 ≈ 2.5 points | Ratio 1.3:1 (rate-slight) ✅
 
 network:
   num_aps: 64                      # Fixed: All scenarios use 64 APs
@@ -15,22 +15,22 @@ network:
   bandwidth: 10e6
   max_power_per_ap: 0.2            # 200mW max transmit power
   noise_power_dbm: -94
-  circuit_power_per_ap: 0.2        # 200mW circuit power
+  circuit_power_per_ap: 1.0        # 1W circuit power (realistic idle consumption)
 
 environment:
   qos_min_rate_mbps: 5.0
 
-  # ⚖️ MATHEMATICALLY BALANCED WEIGHTS (Power Dominant for 20-25 APs)
-  rate_weight: 0.03                # log_sum_rate (40) × 0.03 = 1.2 points
-  power_penalty_weight: 15.0       # normalized_power (0.5) × 15.0 = 7.5 points (Ratio 1.2:7.5)
-  qos_weight: 5.0                  # QoS penalty (Mbps violations) × 5.0
+  # ⚖️ BALANCED WEIGHTS (1.3:1 ratio - rate slightly ahead for baseline-beating)
+  rate_weight: 0.05                # log_sum_rate (~63) × 0.05 ≈ 3.2 points
+  power_penalty_weight: 5.0        # normalized_power (~0.5) × 5.0 ≈ 2.5 points (Ratio 1.3:1)
+  qos_weight: 5.0                  # QoS penalty (Mbps violations)
   fairness_weight: 0.0             # No fairness constraint (16 users)
 
   episode_length: 50
   action_type: 'discrete'
   num_power_levels: 5
   randomize_circuit_power: true    # Adaptive circuit power
-  circuit_power_range: [0.1, 0.5]  # 100mW-500mW range
+  circuit_power_range: [0.5, 2.0]  # 500mW-2W range (realistic)
 
 training:
   total_timesteps: 200000          # Increased for 64 APs (large action space)

@@ -134,10 +134,10 @@ class CellFreeEnv(gym.Env):
         
         # Define action space
         if self.action_type == 'discrete':
-            # IMPROVED: Factored discrete action space
-            # 5 power strategies × 4 AP selection strategies = 20 total actions
+            # Factored discrete action space
+            # 5 power strategies × 8 AP selection strategies = 40 total actions
             self.num_power_levels = 5
-            self.num_ap_strategies = 4
+            self.num_ap_strategies = 8
             self.action_space = spaces.Discrete(self.num_power_levels * self.num_ap_strategies)
         else:
             # Continuous: [power_ap1, ..., power_apN, assoc_threshold]
@@ -260,9 +260,9 @@ class CellFreeEnv(gym.Env):
         qos_normalized = self.qos_requirements / (self.qos_min_rate * 2)
 
         # Normalize circuit power to [0, 1]
-        # Range: 0.05W (50mW) to 1.0W (1000mW) -> normalized to [0, 1]
-        circuit_power_min = 0.05
-        circuit_power_max = 1.0
+        # Range: 0.1W (100mW) to 3.0W (3000mW) -> normalized to [0, 1]
+        circuit_power_min = 0.1
+        circuit_power_max = 3.0
         circuit_power_normalized = np.array([
             (self.network.circuit_power_per_ap - circuit_power_min) /
             (circuit_power_max - circuit_power_min)
@@ -358,11 +358,15 @@ class CellFreeEnv(gym.Env):
         """
         Apply AP selection strategy based on index
 
-        Strategies:
-        0: Nearest-only (most energy efficient, may have poor coverage)
-        1: Top-3 nearest (good balance)
-        2: Top-50% APs (better cooperation, more power)
-        3: All APs (maximum performance, highest power)
+        Strategies (8 total, ordered by increasing AP count):
+        0: Nearest-only (1 AP per user — most energy efficient)
+        1: Top-2 nearest
+        2: Top-3 nearest
+        3: Top-5 nearest
+        4: Top-25% APs
+        5: Top-50% APs
+        6: Top-75% APs
+        7: All APs (maximum performance, highest power)
         """
         # Get channel gains
         channel_gain = tf.abs(self.current_channel[0]).numpy()
@@ -382,19 +386,43 @@ class CellFreeEnv(gym.Env):
                 nearest_ap = np.argmax(channel_gain_per_ap[:, user_idx])
                 ap_association[nearest_ap, user_idx] = 1
 
-        elif strategy_idx == 1:  # Top-3 nearest
+        elif strategy_idx == 1:  # Top-2
+            num_serving = min(2, self.num_aps)
+            for user_idx in range(self.num_users):
+                top_aps = np.argsort(channel_gain_per_ap[:, user_idx])[-num_serving:]
+                ap_association[top_aps, user_idx] = 1
+
+        elif strategy_idx == 2:  # Top-3
             num_serving = min(3, self.num_aps)
             for user_idx in range(self.num_users):
                 top_aps = np.argsort(channel_gain_per_ap[:, user_idx])[-num_serving:]
                 ap_association[top_aps, user_idx] = 1
 
-        elif strategy_idx == 2:  # Top-50%
+        elif strategy_idx == 3:  # Top-5
+            num_serving = min(5, self.num_aps)
+            for user_idx in range(self.num_users):
+                top_aps = np.argsort(channel_gain_per_ap[:, user_idx])[-num_serving:]
+                ap_association[top_aps, user_idx] = 1
+
+        elif strategy_idx == 4:  # Top-25%
+            num_serving = max(1, self.num_aps // 4)
+            for user_idx in range(self.num_users):
+                top_aps = np.argsort(channel_gain_per_ap[:, user_idx])[-num_serving:]
+                ap_association[top_aps, user_idx] = 1
+
+        elif strategy_idx == 5:  # Top-50%
             num_serving = max(1, self.num_aps // 2)
             for user_idx in range(self.num_users):
                 top_aps = np.argsort(channel_gain_per_ap[:, user_idx])[-num_serving:]
                 ap_association[top_aps, user_idx] = 1
 
-        else:  # strategy_idx == 3: All APs
+        elif strategy_idx == 6:  # Top-75%
+            num_serving = max(1, 3 * self.num_aps // 4)
+            for user_idx in range(self.num_users):
+                top_aps = np.argsort(channel_gain_per_ap[:, user_idx])[-num_serving:]
+                ap_association[top_aps, user_idx] = 1
+
+        else:  # strategy_idx == 7: All APs
             ap_association = np.ones((self.num_aps, self.num_users))
 
         return ap_association

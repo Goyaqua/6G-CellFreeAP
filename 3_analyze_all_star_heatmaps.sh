@@ -90,10 +90,10 @@ analyze_star_heatmap() {
 
     print_header "🌟 STAR HEATMAP - Scenario ${scenario_num}: ${scenario_name}"
 
-    local model_path="${model_dir}/models/ppo_cellfree_final"
+    local model_path="${model_dir}/models/ppo_cellfree_final.zip"
 
-    if [ ! -f "${model_path}.zip" ]; then
-        print_error "Model not found: ${model_path}.zip"
+    if [ ! -f "${model_path}" ]; then
+        print_error "Model not found: ${model_path}"
         return 1
     fi
 

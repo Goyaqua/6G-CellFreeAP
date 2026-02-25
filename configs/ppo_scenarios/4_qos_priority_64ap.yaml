@@ -2,9 +2,9 @@
 # 64 APs, 16 Users, Rate-Overwhelming Rewards
 #
 # Scientific Goal: Demonstrate maximum achievable rate when energy is secondary
-# Expected: ~55-64 active APs (all resources used), ~80-120 Mbps/user, low EE
+# Expected: ~48-56 active APs (3-3.5x AP/user), ~80-120 Mbps/user, low EE
 #
-# Reward Balance: rate×0.10 ≈ 4 points | power×2.0 ≈ 1 point | Ratio 4:1 (Rate dominant) ✅
+# Reward Balance: rate×0.06 ≈ 3.8 points | power×3.0 ≈ 1.5 points | Ratio 2.5:1 (rate-dominant) ✅
 
 network:
   num_aps: 64                      # All APs available for max performance
@@ -15,22 +15,22 @@ network:
   bandwidth: 10e6
   max_power_per_ap: 0.2
   noise_power_dbm: -94
-  circuit_power_per_ap: 0.2
+  circuit_power_per_ap: 1.0        # 1W circuit power (realistic idle consumption)
 
 environment:
   qos_min_rate_mbps: 5.0
 
-  # 🚀 RATE-DOMINANT (High Performance Priority)
-  rate_weight: 0.10                # log_sum_rate (40) × 0.10 = 4.0 points
-  power_penalty_weight: 2.0        # normalized_power (0.5) × 2.0 = 1.0 points (Ratio 4:1)
-  qos_weight: 10.0                 # Maximum QoS priority
+  # 🚀 RATE-DOMINANT (2.5:1 ratio - rate wins, power still considered)
+  rate_weight: 0.06                # log_sum_rate (~63) × 0.06 ≈ 3.8 points
+  power_penalty_weight: 3.0        # normalized_power (~0.5) × 3.0 ≈ 1.5 points (Ratio 2.5:1)
+  qos_weight: 5.0                  # Strong QoS (but not training-destabilizing)
   fairness_weight: 0.0             # Performance over fairness
 
   episode_length: 50
   action_type: 'discrete'
   num_power_levels: 5
   randomize_circuit_power: true
-  circuit_power_range: [0.1, 0.5]
+  circuit_power_range: [0.5, 2.0]  # 500mW-2W range (realistic)
 
 training:
   total_timesteps: 200000

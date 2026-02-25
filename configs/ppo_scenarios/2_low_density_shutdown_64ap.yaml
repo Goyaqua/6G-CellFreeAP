@@ -2,9 +2,9 @@
 # 64 APs, 8 Users, Power-Dominant Rewards
 #
 # Scientific Goal: Validate agent learns to shut down unnecessary APs
-# Expected: ~8-12 active APs (1-1.5 AP per user), ~60-100 Mbps/user, very high EE
+# Expected: ~12-16 active APs (1.5-2x AP/user), ~60-100 Mbps/user, very high EE
 #
-# Reward Balance: rate×0.015 ≈ 0.6 points | power×25.0 ≈ 12.5 points | Ratio 0.6:12.5 (Extreme!) ✅
+# Reward Balance: rate×0.05 ≈ 1.65 points | power×5.0 ≈ 2.5 points | Ratio 1:1.5 (mild power-dominant) ✅
 
 network:
   num_aps: 64                      # Over-provisioned (64 APs for 8 users)
@@ -15,14 +15,14 @@ network:
   bandwidth: 10e6
   max_power_per_ap: 0.2
   noise_power_dbm: -94
-  circuit_power_per_ap: 0.2
+  circuit_power_per_ap: 1.0        # 1W circuit power (realistic idle consumption)
 
 environment:
   qos_min_rate_mbps: 5.0
 
-  # 🔋 EXTREME POWER SAVING (8-12 APs for 8 users)
-  rate_weight: 0.015               # log_sum_rate (40) × 0.015 = 0.6 points
-  power_penalty_weight: 25.0       # normalized_power (0.5) × 25.0 = 12.5 points (Ratio 0.6:12.5)
+  # 🔋 POWER SAVING (1:1.5 ratio - mild power saving, still rate-competitive)
+  rate_weight: 0.05                # log_sum_rate (~33) × 0.05 ≈ 1.65 points
+  power_penalty_weight: 5.0        # normalized_power (~0.5) × 5.0 ≈ 2.5 points (Ratio 1:1.5)
   qos_weight: 3.0                  # Relaxed QoS (8 users = less congestion)
   fairness_weight: 0.0             # No fairness needed (few users)
 
@@ -30,7 +30,7 @@ environment:
   action_type: 'discrete'
   num_power_levels: 5
   randomize_circuit_power: true
-  circuit_power_range: [0.1, 0.5]
+  circuit_power_range: [0.5, 2.0]  # 500mW-2W range (realistic)
 
 training:
   total_timesteps: 200000

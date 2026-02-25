@@ -183,37 +183,35 @@ class BaselineStrategies:
                 axis=1
             )
         
-        # Load balancing: assign users to least loaded AP with good channel
+        # Load balancing: assign each user to top-K APs, preferring least loaded
         ap_association = np.zeros((network.num_aps, network.num_users))
         ap_loads = np.zeros(network.num_aps)
-        
+        num_serving_per_user = min(5, network.num_aps)  # Each user served by top-5 APs
+
         # Sort users by their best channel gain (prioritize users with poor channels)
         user_best_gains = np.max(channel_gain_per_ap, axis=0)
         user_order = np.argsort(user_best_gains)
-        
+
         for user_idx in user_order:
-            # Find APs with good channel (top 50%)
             gains = channel_gain_per_ap[:, user_idx]
-            threshold = np.median(gains)
-            good_aps = np.where(gains >= threshold)[0]
-            
-            if len(good_aps) == 0:
-                good_aps = [np.argmax(gains)]
-            
-            # Among good APs, choose least loaded
-            least_loaded_ap = good_aps[np.argmin(ap_loads[good_aps])]
-            ap_association[least_loaded_ap, user_idx] = 1
-            ap_loads[least_loaded_ap] += 1
-        
-        # Power allocation proportional to load
+            # Load-aware scoring: higher gain + lower load = better
+            max_gain = np.max(gains) + 1e-10
+            scores = gains / max_gain - 0.3 * (ap_loads / (np.max(ap_loads) + 1))
+            top_aps = np.argsort(scores)[-num_serving_per_user:]
+
+            ap_association[top_aps, user_idx] = 1
+            ap_loads[top_aps] += 1
+
+        # Power allocation proportional to load (only active APs)
+        active_mask = (np.sum(ap_association, axis=1) > 0).astype(float)
         max_load = np.max(ap_loads)
         if max_load > 0:
-            power_factors = 0.3 + 0.7 * (ap_loads / max_load)  # Range: [0.3, 1.0]
+            power_factors = 0.3 + 0.7 * (ap_loads / max_load)
         else:
             power_factors = np.ones(network.num_aps)
-        
-        power_allocation = power_factors * network.max_power_per_ap
-        
+
+        power_allocation = power_factors * network.max_power_per_ap * active_mask
+
         return power_allocation, ap_association
 
     @staticmethod

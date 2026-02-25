@@ -2,9 +2,9 @@
 # 64 APs, 32 Users, Rate-Dominant with Fairness
 #
 # Scientific Goal: Test interference management and fair allocation under congestion
-# Expected: ~50-60 active APs, ~20-40 Mbps/user, minimal QoS violations
+# Expected: ~40-48 active APs (1.25-1.5x AP/user), ~20-40 Mbps/user, minimal QoS violations
 #
-# Reward Balance: rate×0.08 ≈ 3.2 points | power×5.0 ≈ 2.5 points | Ratio 3.2:2.5 (Rate slightly wins) ✅
+# Reward Balance: rate×0.03 ≈ 3.3 points | power×4.0 ≈ 2.0 points | Ratio 1.6:1 (rate-dominant + fairness) ✅
 
 network:
   num_aps: 64                      # All APs may be needed
@@ -15,22 +15,22 @@ network:
   bandwidth: 10e6
   max_power_per_ap: 0.2
   noise_power_dbm: -94
-  circuit_power_per_ap: 0.2
+  circuit_power_per_ap: 1.0        # 1W circuit power (realistic idle consumption)
 
 environment:
   qos_min_rate_mbps: 5.0
 
-  # 📶 RATE-DOMINANT WITH FAIRNESS (High Density Priority)
-  rate_weight: 0.08                # log_sum_rate (40) × 0.08 = 3.2 points
-  power_penalty_weight: 5.0        # normalized_power (0.5) × 5.0 = 2.5 points (Ratio 3.2:2.5)
-  qos_weight: 6.0                  # Strict QoS (many users competing)
-  fairness_weight: 5.0             # Fairness critical (avoid user starvation)
+  # 📶 RATE-DOMINANT WITH FAIRNESS (1.6:1 ratio - rate leads, fairness guards)
+  rate_weight: 0.03                # log_sum_rate (~110) × 0.03 ≈ 3.3 points
+  power_penalty_weight: 4.0        # normalized_power (~0.5) × 4.0 ≈ 2.0 points (Ratio 1.6:1)
+  qos_weight: 3.0                  # Moderate QoS (scaled down for 32 users)
+  fairness_weight: 3.0             # Fairness important but not overwhelming
 
   episode_length: 50
   action_type: 'discrete'
   num_power_levels: 5
   randomize_circuit_power: true
-  circuit_power_range: [0.1, 0.5]
+  circuit_power_range: [0.5, 2.0]  # 500mW-2W range (realistic)
 
 training:
   total_timesteps: 250000          # Extra timesteps for complex scenario
