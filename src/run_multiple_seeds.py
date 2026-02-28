@@ -60,7 +60,7 @@ def run_baseline_with_seed(config_path, seed, episodes=50):
     print(f"\n  Seed {seed}: Evaluating {len(strategies)} strategies...")
 
     for strategy in strategies:
-        result = evaluate_baseline(env.network, strategy, num_episodes=episodes)
+        result = evaluate_baseline(env.network, strategy, target_qos_bps=env.qos_min_rate, num_episodes=episodes)
         results[strategy] = result
         print(f"    {strategy}: EE={result['mean_energy_efficiency']:.2e}")
 

@@ -134,7 +134,7 @@ class CellFreeEnv(gym.Env):
         
         # Define action space
         if self.action_type == 'discrete':
-            # Factored discrete action space
+            # IMPROVED: Factored discrete action space
             # 5 power strategies × 8 AP selection strategies = 40 total actions
             self.num_power_levels = 5
             self.num_ap_strategies = 8
@@ -214,7 +214,7 @@ class CellFreeEnv(gym.Env):
         active_aps_count = np.sum(np.sum(ap_association, axis=1) > 0)
 
         info.update({
-            'sinr_db': 10 * np.log10(tf.reduce_mean(sinr).numpy()),
+            'sinr_db': 10 * np.log10(max(tf.reduce_mean(sinr).numpy(), 1e-12)),
             'avg_rate_mbps': tf.reduce_mean(rates).numpy() / 1e6,
             'user_rates_mbps': (rates.numpy() / 1e6).tolist(),  # Per-user rates in Mbps
             'energy_efficiency': self.network.calculate_energy_efficiency(
@@ -235,32 +235,26 @@ class CellFreeEnv(gym.Env):
 
         Observation: [normalized_channel_gains, normalized_qos_requirements, normalized_circuit_power]
         """
-        # Extract channel gains (magnitude)
-        channel_gain = tf.abs(self.current_channel[0]).numpy()  # (num_users, num_tx)
+        # Get channel gains per AP
+        channel_gain_per_ap = self.network.get_channel_gain_per_ap(self.current_channel)
 
-        # Average over antennas to get per-AP gains
-        channel_gain_per_ap = np.zeros((self.num_users, self.num_aps))
-        for ap_idx in range(self.num_aps):
-            ant_start = ap_idx * self.network.num_antennas_per_ap
-            ant_end = (ap_idx + 1) * self.network.num_antennas_per_ap
-            channel_gain_per_ap[:, ap_idx] = np.mean(
-                channel_gain[:, ant_start:ant_end],
-                axis=1
-            )
+        # Flatten (num_aps, num_users)
+        channel_gain_flat = channel_gain_per_ap.flatten()
 
-        # Transpose to (num_aps, num_users) and flatten
-        channel_gain_flat = channel_gain_per_ap.T.flatten()
-
-        # Normalize channel gains to [0, 1]
-        channel_gain_normalized = (channel_gain_flat - channel_gain_flat.min()) / (
-            channel_gain_flat.max() - channel_gain_flat.min() + 1e-10
-        )
+        # FIXED: Use theoretical absolute bounds for channel gain normalization (dB scale)
+        # Prevents loss of absolute channel quality information across time steps
+        channel_gain_db = 20 * np.log10(channel_gain_flat + 1e-10)
+        MIN_GAIN_DB = -150.0  # Max distance (~500m) + heavy shadowing + deep fade
+        MAX_GAIN_DB = -20.0   # Min distance (~1m) + favorable fading
+        
+        channel_gain_normalized = (channel_gain_db - MIN_GAIN_DB) / (MAX_GAIN_DB - MIN_GAIN_DB)
+        channel_gain_normalized = np.clip(channel_gain_normalized, 0.0, 1.0)
 
         # Normalize QoS requirements
         qos_normalized = self.qos_requirements / (self.qos_min_rate * 2)
 
         # Normalize circuit power to [0, 1]
-        # Range: 0.1W (100mW) to 3.0W (3000mW) -> normalized to [0, 1]
+        # Range: 0.1W to 3.0W -> normalized to [0, 1]
         circuit_power_min = 0.1
         circuit_power_max = 3.0
         circuit_power_normalized = np.array([
@@ -308,22 +302,20 @@ class CellFreeEnv(gym.Env):
             threshold = action[-1]
             
             # Get channel gains for association
-            channel_gain = tf.abs(self.current_channel[0]).numpy()
-            channel_gain_per_ap = np.zeros((self.num_aps, self.num_users))
-            for ap_idx in range(self.num_aps):
-                ant_start = ap_idx * self.network.num_antennas_per_ap
-                ant_end = (ap_idx + 1) * self.network.num_antennas_per_ap
-                channel_gain_per_ap[ap_idx] = np.mean(
-                    channel_gain[:, ant_start:ant_end],
-                    axis=1
-                )
+            channel_gain_per_ap = self.network.get_channel_gain_per_ap(self.current_channel)
             
             # Threshold-based association
             ap_association = np.zeros((self.num_aps, self.num_users))
             for user_idx in range(self.num_users):
                 # Normalize gains for this user
                 gains = channel_gain_per_ap[:, user_idx]
-                gains_norm = (gains - gains.min()) / (gains.max() - gains.min() + 1e-10)
+                
+                # FIXED: Use theoretical absolute bounds for consistency with state observation
+                gains_db = 20 * np.log10(gains + 1e-10)
+                MIN_GAIN_DB = -150.0
+                MAX_GAIN_DB = -20.0
+                gains_norm = (gains_db - MIN_GAIN_DB) / (MAX_GAIN_DB - MIN_GAIN_DB)
+                gains_norm = np.clip(gains_norm, 0.0, 1.0)
                 
                 # Associate with APs above threshold
                 serving_aps = gains_norm >= threshold
@@ -358,26 +350,18 @@ class CellFreeEnv(gym.Env):
         """
         Apply AP selection strategy based on index
 
-        Strategies (8 total, ordered by increasing AP count):
-        0: Nearest-only (1 AP per user — most energy efficient)
+        Strategies:
+        0: Nearest-only (1 AP per user, most energy efficient)
         1: Top-2 nearest
         2: Top-3 nearest
         3: Top-5 nearest
         4: Top-25% APs
         5: Top-50% APs
         6: Top-75% APs
-        7: All APs (maximum performance, highest power)
+        7: All APs (maximum cooperation, highest power)
         """
         # Get channel gains
-        channel_gain = tf.abs(self.current_channel[0]).numpy()
-        channel_gain_per_ap = np.zeros((self.num_aps, self.num_users))
-        for ap_idx in range(self.num_aps):
-            ant_start = ap_idx * self.network.num_antennas_per_ap
-            ant_end = (ap_idx + 1) * self.network.num_antennas_per_ap
-            channel_gain_per_ap[ap_idx] = np.mean(
-                channel_gain[:, ant_start:ant_end],
-                axis=1
-            )
+        channel_gain_per_ap = self.network.get_channel_gain_per_ap(self.current_channel)
 
         ap_association = np.zeros((self.num_aps, self.num_users))
 
@@ -417,7 +401,7 @@ class CellFreeEnv(gym.Env):
                 ap_association[top_aps, user_idx] = 1
 
         elif strategy_idx == 6:  # Top-75%
-            num_serving = max(1, 3 * self.num_aps // 4)
+            num_serving = max(1, (3 * self.num_aps) // 4)
             for user_idx in range(self.num_users):
                 top_aps = np.argsort(channel_gain_per_ap[:, user_idx])[-num_serving:]
                 ap_association[top_aps, user_idx] = 1
@@ -463,8 +447,9 @@ class CellFreeEnv(gym.Env):
         qos_penalty = self.qos_weight * np.sum(qos_violations)
 
         # 3. Normalized Power Cost
-        total_tx_power = np.sum(power_allocation)
-        active_aps = np.sum(np.sum(ap_association, axis=1) > 0)
+        active_aps_mask = np.sum(ap_association, axis=1) > 0
+        total_tx_power = np.sum(power_allocation[active_aps_mask])
+        active_aps = np.sum(active_aps_mask)
         total_circuit_power = active_aps * self.network.circuit_power_per_ap
         total_power = total_tx_power + total_circuit_power
 

@@ -22,8 +22,8 @@ class CellFreeNetworkSionna:
     
     def __init__(
         self,
-        num_aps: int = 64,
-        num_users: int = 16,
+        num_aps: int = 25,
+        num_users: int = 10,
         num_antennas_per_ap: int = 1,
         area_size: float = 500.0,
         carrier_frequency: float = 3.5e9,
@@ -31,23 +31,21 @@ class CellFreeNetworkSionna:
         max_power_per_ap: float = 200e-3,
         noise_power_dbm: float = -94,
         circuit_power_per_ap: float = 200e-3,
-        topology_mode: str = 'random',
         seed: Optional[int] = None
     ):
         """
         Initialize Cell-Free Network
 
         Args:
-            num_aps: Number of Access Points (default: 64)
-            num_users: Number of users (default: 16)
+            num_aps: Number of Access Points
+            num_users: Number of users
             num_antennas_per_ap: Number of antennas per AP
-            area_size: Coverage area size (meters, default: 500)
+            area_size: Coverage area size (meters)
             carrier_frequency: Carrier frequency (Hz)
             bandwidth: System bandwidth (Hz)
             max_power_per_ap: Maximum transmit power per AP (Watts)
             noise_power_dbm: Noise power (dBm)
             circuit_power_per_ap: Circuit power consumption per active AP (Watts)
-            topology_mode: User distribution pattern ('random' or 'star', default: 'random')
             seed: Random seed for reproducibility
         """
         self.num_aps = num_aps
@@ -59,43 +57,34 @@ class CellFreeNetworkSionna:
         self.max_power_per_ap = max_power_per_ap
         self.noise_power_dbm = noise_power_dbm
         self.circuit_power_per_ap = circuit_power_per_ap
-        self.topology_mode = topology_mode
-
-        # Validate topology mode
-        if self.topology_mode not in ['random', 'star']:
-            raise ValueError(f"topology_mode must be 'random' or 'star', got '{self.topology_mode}'")
-
+        
         # Set random seed
         if seed is not None:
             np.random.seed(seed)
             tf.random.set_seed(seed)
-
+        
         # Total transmit antennas
         self.num_tx = num_aps * num_antennas_per_ap
         self.num_rx_per_user = 1  # Single antenna users
-
+        
         # Deploy network
         self.ap_positions = self._deploy_aps()
         self.user_positions = self._deploy_users()
         self.distances = self._calculate_distances()
-
+        
         # Setup channel model
         self._setup_channel()
-
+        
         # Convert noise power to linear scale (Watts)
         # dbm is logarithmic scale:
         # Thus, noise_power_linear = 10^(noise_power_dbm/10) / 1000
         self.noise_power_linear = 10**(self.noise_power_dbm / 10) / 1000
         
     def _deploy_aps(self) -> np.ndarray:
-        """
-        Deploy APs in a regular UNIFORM GRID pattern
-        Fixed infrastructure - always placed in a grid regardless of user distribution
-        AP height = 10m (not stored in 2D positions, used for path loss calculations)
-        """
+        """Deploy APs in a regular GRID pattern"""
         side_length = int(np.ceil(np.sqrt(self.num_aps)))
         spacing = self.area_size / (side_length + 1)
-
+        
         positions = []
         count = 0
         for i in range(side_length):
@@ -108,87 +97,12 @@ class CellFreeNetworkSionna:
                 count += 1
             if count >= self.num_aps:
                 break
-
+        
         return np.array(positions)
     
     def _deploy_users(self) -> np.ndarray:
-        """
-        Deploy users according to the selected topology mode
-        User height = 1.5m (not stored in 2D positions)
-
-        Returns:
-            np.ndarray: User positions (num_users, 2) in [x, y] coordinates
-        """
-        if self.topology_mode == 'random':
-            return self._deploy_users_random()
-        elif self.topology_mode == 'star':
-            return self._deploy_users_star()
-        else:
-            raise ValueError(f"Unknown topology_mode: {self.topology_mode}")
-
-    def _deploy_users_random(self) -> np.ndarray:
-        """
-        Mode A: Random User Distribution
-        Users are uniformly distributed across the entire area
-        """
+        """Deploy users randomly in the coverage area"""
         return np.random.uniform(0, self.area_size, (self.num_users, 2))
-
-    def _deploy_users_star(self) -> np.ndarray:
-        """
-        Mode B: Star User Distribution (4-Avenue Cross Pattern)
-        Simulates 4 avenues radiating from the center in X (cross) shape
-
-        Pattern:
-        - 4 avenues at angles: 45°, 135°, 225°, 315° (diagonal cross)
-        - Users distributed uniformly among avenues
-        - Radial distance: Random between 40m (center plaza) and 240m (edge)
-        - Lateral jitter: ±15m perpendicular to avenue angle (street width)
-        """
-        # Center of the area
-        center_x = self.area_size / 2
-        center_y = self.area_size / 2
-
-        # 4 avenues at 90-degree intervals forming an X (diagonal cross)
-        num_avenues = 4
-        avenue_angles = np.array([45, 135, 225, 315])  # Diagonal cross pattern
-
-        # Radial distance bounds
-        min_radius = 40.0  # Center plaza
-        max_radius = 240.0  # Edge of radiating avenues
-
-        # Lateral jitter (street width)
-        jitter_range = 15.0  # ±15m
-
-        positions = []
-
-        for i in range(self.num_users):
-            # Assign user to a random avenue
-            avenue_idx = np.random.randint(0, num_avenues)
-            angle_deg = avenue_angles[avenue_idx]
-            angle_rad = np.deg2rad(angle_deg)
-
-            # Random radial distance along the avenue
-            radius = np.random.uniform(min_radius, max_radius)
-
-            # Position along the avenue (before jitter)
-            x_avenue = center_x + radius * np.cos(angle_rad)
-            y_avenue = center_y + radius * np.sin(angle_rad)
-
-            # Add lateral jitter perpendicular to the avenue
-            # Perpendicular angle is +90° to the avenue angle
-            perp_angle_rad = angle_rad + np.pi / 2
-            jitter = np.random.uniform(-jitter_range, jitter_range)
-
-            x = x_avenue + jitter * np.cos(perp_angle_rad)
-            y = y_avenue + jitter * np.sin(perp_angle_rad)
-
-            # Ensure positions stay within the area bounds
-            x = np.clip(x, 0, self.area_size)
-            y = np.clip(y, 0, self.area_size)
-
-            positions.append([x, y])
-
-        return np.array(positions)
     
     def _calculate_distances(self) -> np.ndarray:
         """Calculate distance matrix between all APs and users by euclidean distance"""
@@ -200,31 +114,58 @@ class CellFreeNetworkSionna:
                 )
         return distances
     
-    def reset_topology(self, topology_mode: Optional[str] = None):
+    def reset_topology(self, topology_mode: str = 'random'):
         """
-        Reset user positions with a new (or same) topology mode
-        APs remain fixed in grid pattern
-
+        Dynamically recreate user positions based on chosen topology
+        
         Args:
-            topology_mode: New topology mode ('random' or 'star')
-                          If None, uses the current topology_mode
-
-        Returns:
-            np.ndarray: New user positions
+            topology_mode: 'random' or 'star' (cross-pattern)
         """
-        if topology_mode is not None:
-            if topology_mode not in ['random', 'star']:
-                raise ValueError(f"topology_mode must be 'random' or 'star', got '{topology_mode}'")
-            self.topology_mode = topology_mode
-
-        # Redeploy users with the (possibly new) topology mode
-        self.user_positions = self._deploy_users()
-
-        # Recalculate distances
+        if topology_mode == 'star':
+            # 4-Avenue cross pattern for topology analysis
+            self.user_positions = np.zeros((self.num_users, 2))
+            center = self.area_size / 2
+            max_radius = self.area_size * 0.45
+            
+            # Divide users across 4 avenues (45, 135, 225, 315 degrees)
+            users_per_avenue = self.num_users // 4
+            avenue_angles = [45, 135, 225, 315]
+            
+            user_idx = 0
+            for angle_deg in avenue_angles:
+                angle_rad = np.deg2rad(angle_deg)
+                for i in range(users_per_avenue):
+                    if user_idx >= self.num_users: break
+                    # Distribute radially outward
+                    r = max_radius * (i + 1) / users_per_avenue
+                    # Add tiny bit of noise so they aren't perfectly on a line
+                    noise_x = np.random.normal(0, 5.0)
+                    noise_y = np.random.normal(0, 5.0)
+                    
+                    x = center + r * np.cos(angle_rad) + noise_x
+                    y = center + r * np.sin(angle_rad) + noise_y
+                    
+                    # Keep within bounds
+                    self.user_positions[user_idx] = [
+                        np.clip(x, 0, self.area_size),
+                        np.clip(y, 0, self.area_size)
+                    ]
+                    user_idx += 1
+                    
+            # Place any remaining users randomly
+            while user_idx < self.num_users:
+                self.user_positions[user_idx] = np.random.uniform(0, self.area_size, 2)
+                user_idx += 1
+                
+        else:
+            # Default Random 
+            self.user_positions = np.random.uniform(
+                0, self.area_size, (self.num_users, 2)
+            )
+            
+        # Re-calculate distances
         self.distances = self._calculate_distances()
-
-        return self.user_positions
-
+    
     def _setup_channel(self):
         """Setup Sionna channel models"""
         # Rayleigh block fading for small-scale fading
@@ -234,7 +175,7 @@ class CellFreeNetworkSionna:
             num_tx=self.num_tx,
             num_tx_ant=1
         )
-
+        
         # AWGN channel for noise modeling
         self.awgn = AWGN()
     
@@ -323,6 +264,29 @@ class CellFreeNetworkSionna:
         
         return h_with_pathloss
     
+    def get_channel_gain_per_ap(self, channel_matrix: tf.Tensor) -> np.ndarray:
+        """
+        Calculate average channel gain magnitude per AP from the channel matrix.
+        
+        Args:
+            channel_matrix: Complex channel matrix (batch_size, num_users, num_tx)
+            
+        Returns:
+            channel_gain_per_ap: (num_aps, num_users) numpy array
+        """
+        channel_gain = tf.abs(channel_matrix[0]).numpy()  # (num_users, num_tx)
+        
+        channel_gain_per_ap = np.zeros((self.num_aps, self.num_users))
+        for ap_idx in range(self.num_aps):
+            ant_start = ap_idx * self.num_antennas_per_ap
+            ant_end = (ap_idx + 1) * self.num_antennas_per_ap
+            channel_gain_per_ap[ap_idx] = np.mean(
+                channel_gain[:, ant_start:ant_end],
+                axis=1
+            )
+            
+        return channel_gain_per_ap
+    
     def calculate_sinr_and_rate(
         self,
         channel_matrix: tf.Tensor,
@@ -359,59 +323,68 @@ class CellFreeNetworkSionna:
         """
         TensorFlow-optimized SINR and rate calculation
         Prevents memory leak by caching the computation graph
+        Uses unicast physical model: Power divides among users, idle APs use 0 power.
         """
+        # Number of users served by each AP (num_aps,)
+        users_per_ap = tf.reduce_sum(ap_association, axis=1)
+        
+        # Active AP mask
+        active_ap_mask = tf.cast(users_per_ap > 0, tf.float32)
+        users_per_ap_safe = tf.maximum(users_per_ap, 1.0)
+        
+        # Zero out power for idle APs to prevent fake interference
+        actual_power_allocation = power_allocation * active_ap_mask
+        
         # Power per antenna (split AP power equally among antennas)
         power_per_antenna = tf.repeat(
-            power_allocation / tf.cast(self.num_antennas_per_ap, tf.float32),
+            actual_power_allocation / tf.cast(self.num_antennas_per_ap, tf.float32),
             self.num_antennas_per_ap
         )  # Shape: (num_tx,)
 
         # Channel gain magnitude squared
         channel_gain = tf.abs(channel_matrix) ** 2
-        # Shape: (batch_size, num_users, num_tx)
 
         # Expand power for broadcasting: (num_tx,) -> (1, 1, num_tx)
         power_expanded = tf.reshape(power_per_antenna, [1, 1, -1])
 
-        # Received power from all antennas: (batch_size, num_users, num_tx)
+        # Received power from all antennas
         received_power_all = channel_gain * power_expanded
 
         # Reshape for AP-based calculation
-        # (batch_size, num_users, num_tx) -> (batch_size, num_users, num_aps, num_antennas_per_ap)
         batch_size = tf.shape(channel_matrix)[0]
         received_power_reshaped = tf.reshape(
             received_power_all,
             [batch_size, self.num_users, self.num_aps, self.num_antennas_per_ap]
         )
 
-        # Sum power across antennas of each AP: (batch_size, num_users, num_aps)
+        # Sum power across antennas of each AP
         power_per_ap = tf.reduce_sum(received_power_reshaped, axis=-1)
 
-        # Transpose association matrix for broadcasting: (num_aps, num_users) -> (num_users, num_aps)
+        # Transpose association matrix
         ap_association_t = tf.transpose(ap_association)
-
-        # Expand for batch: (num_users, num_aps) -> (1, num_users, num_aps)
         ap_association_expanded = tf.expand_dims(ap_association_t, axis=0)
 
+        # Signal fraction per AP: 1 / number of users it serves
+        signal_fraction_per_ap = 1.0 / users_per_ap_safe
+        signal_fraction_expanded = tf.reshape(signal_fraction_per_ap, [1, 1, -1])
+
         # Calculate signal and interference power
-        signal_power = tf.reduce_sum(power_per_ap * ap_association_expanded, axis=-1)  # (batch_size, num_users)
-        total_power = tf.reduce_sum(power_per_ap, axis=-1)  # (batch_size, num_users)
-        interference_power = total_power - signal_power  # (batch_size, num_users)
-
-        # Calculate SINR with epsilon to prevent division by zero
-        epsilon = 1e-12  # Small constant to prevent numerical instability
-        sinr_tensor = signal_power / (
-            interference_power + tf.constant(self.noise_power_linear, dtype=tf.float32) + epsilon
+        signal_power = tf.reduce_sum(
+            power_per_ap * ap_association_expanded * signal_fraction_expanded, 
+            axis=-1
         )
+        total_power = tf.reduce_sum(power_per_ap, axis=-1)
+        interference_power = total_power - signal_power
 
-        # Clip SINR to prevent extremely large values (max SINR = 60 dB = 1e6)
+        # Calculate SINR
+        epsilon = 1e-12
+        sinr_tensor = signal_power / (interference_power + tf.constant(self.noise_power_linear, dtype=tf.float32) + epsilon)
         sinr_clipped = tf.clip_by_value(sinr_tensor, 0.0, 1e6)
 
-        # Calculate achievable rate using Shannon formula
-        # Add epsilon inside log to prevent log(0) or log(negative)
+        # Calculate rate
         rates = self.bandwidth * tf.math.log(1.0 + tf.maximum(sinr_clipped, 0.0) + epsilon) / tf.math.log(2.0)
 
-        return sinr_tensor, rates
+        return sinr_clipped, rates
     
     def calculate_energy_efficiency(
         self,
@@ -437,17 +410,16 @@ class CellFreeNetworkSionna:
         total_rate = tf.reduce_sum(rates, axis=-1)  # (batch_size,)
 
         # Calculate total power consumption
-        # 1. Transmit power
-        total_tx_power = np.sum(power_allocation)
-
-        # 2. Circuit power (only for active APs)
         if ap_association is not None:
             # An AP is active if it serves at least one user
-            active_aps = np.sum(np.sum(ap_association, axis=1) > 0)
+            active_aps_mask = np.sum(ap_association, axis=1) > 0
+            active_aps = np.sum(active_aps_mask)
             total_circuit_power = active_aps * self.circuit_power_per_ap
+            total_tx_power = np.sum(power_allocation[active_aps_mask])
         else:
             # If no association matrix, assume all APs are active
             total_circuit_power = self.num_aps * self.circuit_power_per_ap
+            total_tx_power = np.sum(power_allocation)
 
         # Total power = Transmit + Circuit
         total_power = total_tx_power + total_circuit_power
@@ -547,57 +519,22 @@ class CellFreeNetworkSionna:
         plt.show()
 
     def visualize_network(self, save_path: Optional[str] = None):
-        """Visualize network topology with support for different user distributions"""
-        plt.figure(figsize=(12, 12))
-
-        # For star topology, draw the avenues as reference lines
-        if self.topology_mode == 'star':
-            center_x = self.area_size / 2
-            center_y = self.area_size / 2
-            num_avenues = 4
-            avenue_angles = np.array([45, 135, 225, 315])  # 4 avenues forming X (diagonal cross)
-            max_radius = 240.0
-
-            for angle_deg in avenue_angles:
-                angle_rad = np.deg2rad(angle_deg)
-                x_end = center_x + max_radius * np.cos(angle_rad)
-                y_end = center_y + max_radius * np.sin(angle_rad)
-                plt.plot(
-                    [center_x, x_end],
-                    [center_y, y_end],
-                    'gray',
-                    alpha=0.3,
-                    linestyle='--',
-                    linewidth=1,
-                    zorder=1
-                )
-
-            # Mark the center
-            plt.scatter(
-                [center_x],
-                [center_y],
-                c='gold',
-                marker='X',
-                s=500,
-                label='Center (Cross Hub)',
-                edgecolors='black',
-                linewidths=2,
-                zorder=6
-            )
-
-        # Plot APs (Fixed Grid Infrastructure)
+        """Visualize network topology"""
+        plt.figure(figsize=(10, 10))
+        
+        # Plot APs
         plt.scatter(
             self.ap_positions[:, 0],
             self.ap_positions[:, 1],
             c='red',
             marker='^',
             s=300,
-            label='Access Points (Fixed Grid)',
+            label='Access Points',
             edgecolors='black',
             linewidths=2,
             zorder=5
         )
-
+        
         # Plot users
         plt.scatter(
             self.user_positions[:, 0],
@@ -605,35 +542,31 @@ class CellFreeNetworkSionna:
             c='blue',
             marker='o',
             s=150,
-            label=f'Users ({self.topology_mode} distribution)',
+            label='Users',
             edgecolors='black',
             linewidths=1.5,
             zorder=5
         )
-
-        # Add labels (optional, can be commented out for cleaner plots with many APs/users)
-        if self.num_aps <= 25:
-            for i, pos in enumerate(self.ap_positions):
-                plt.text(pos[0], pos[1] + 15, f'AP{i}', ha='center', fontsize=7, color='darkred')
-
-        if self.num_users <= 20:
-            for i, pos in enumerate(self.user_positions):
-                plt.text(pos[0], pos[1] - 15, f'U{i}', ha='center', fontsize=7, color='darkblue')
-
+        
+        # Add labels
+        for i, pos in enumerate(self.ap_positions):
+            plt.text(pos[0], pos[1] + 15, f'AP{i}', ha='center', fontsize=8)
+        
+        for i, pos in enumerate(self.user_positions):
+            plt.text(pos[0], pos[1] - 15, f'U{i}', ha='center', fontsize=8)
+        
         plt.xlabel('X (meters)', fontsize=14)
         plt.ylabel('Y (meters)', fontsize=14)
-        title = f'Cell-Free Network Topology\n{self.num_aps} APs (Grid) | {self.num_users} Users ({self.topology_mode.capitalize()} Mode)'
-        plt.title(title, fontsize=16, fontweight='bold')
-        plt.legend(fontsize=11, loc='upper right')
+        plt.title('Cell-Free Network Topology', fontsize=16, fontweight='bold')
+        plt.legend(fontsize=12, loc='upper right')
         plt.grid(True, alpha=0.3, linestyle='--')
         plt.xlim(-20, self.area_size + 20)
         plt.ylim(-20, self.area_size + 20)
-        plt.axis('equal')
         plt.tight_layout()
-
+        
         if save_path:
             plt.savefig(save_path, dpi=300, bbox_inches='tight')
-
+        
         plt.show()
     
     def get_network_info(self) -> Dict:
@@ -643,11 +576,9 @@ class CellFreeNetworkSionna:
             'num_users': self.num_users,
             'num_antennas_per_ap': self.num_antennas_per_ap,
             'area_size': self.area_size,
-            'topology_mode': self.topology_mode,
             'carrier_frequency': self.carrier_frequency,
             'bandwidth': self.bandwidth,
             'max_power_per_ap': self.max_power_per_ap,
             'noise_power_dbm': self.noise_power_dbm,
-            'circuit_power_per_ap': self.circuit_power_per_ap,
             'total_tx_antennas': self.num_tx
         }

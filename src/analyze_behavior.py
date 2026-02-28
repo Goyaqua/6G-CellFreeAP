@@ -28,19 +28,19 @@ from stable_baselines3 import PPO
 
 # Action Space Mapping (From your methodology)
 POWER_LEVELS = ["Very Low", "Low", "Medium", "High", "Max"]  # 5 levels
-CLUSTERING_STRATEGIES = ["Nearest-Only", "Top-3", "Top-50%", "All-Active"]  # 4 strategies
+CLUSTERING_STRATEGIES = ["Nearest-Only", "Top-2", "Top-3", "Top-5", "Top-25%", "Top-50%", "Top-75%", "All-Active"]  # 8 strategies
 
 
 def decode_action(action_id):
     """
-    Decode action ID (0-19) to human-readable (Power Level, Clustering Strategy)
+    Decode action ID (0-39) to human-readable (Power Level, Clustering Strategy)
 
-    Assumption: action = power_idx * 4 + cluster_idx
+    Assumption: action = power_idx * 8 + cluster_idx
     - Power: 0-4 (5 levels)
-    - Clustering: 0-3 (4 strategies)
+    - Clustering: 0-7 (8 strategies)
     """
-    power_idx = action_id // 4
-    cluster_idx = action_id % 4
+    power_idx = action_id // 8
+    cluster_idx = action_id % 8
 
     return POWER_LEVELS[power_idx], CLUSTERING_STRATEGIES[cluster_idx]
 
@@ -149,11 +149,11 @@ def analyze_power_and_clustering_separately(action_history):
     Separate analysis: Power level distribution and Clustering strategy distribution
     """
     power_distribution = [0] * 5  # 5 power levels
-    cluster_distribution = [0] * 4  # 4 clustering strategies
+    cluster_distribution = [0] * 8  # 8 clustering strategies
 
     for action_id in action_history:
-        power_idx = action_id // 4
-        cluster_idx = action_id % 4
+        power_idx = action_id // 8
+        cluster_idx = action_id % 8
         power_distribution[power_idx] += 1
         cluster_distribution[cluster_idx] += 1
 
@@ -242,11 +242,11 @@ def plot_action_distribution(action_history, save_dir, scenario_name):
     """
     os.makedirs(save_dir, exist_ok=True)
 
-    # 1. Overall Action Histogram (0-19)
+    # 1. Overall Action Histogram (0-39)
     fig1, ax = plt.subplots(figsize=(14, 6))
 
     action_counts = Counter(action_history)
-    actions = list(range(20))
+    actions = list(range(40))
     counts = [action_counts.get(a, 0) for a in actions]
 
     bars = ax.bar(actions, counts, color='teal', alpha=0.8, edgecolor='black', linewidth=1.2)
@@ -254,7 +254,7 @@ def plot_action_distribution(action_history, save_dir, scenario_name):
     ax.set_xlabel('Action ID', fontsize=13, fontweight='bold')
     ax.set_ylabel('Frequency', fontsize=13, fontweight='bold')
     ax.set_title(f'Action Distribution: {scenario_name}', fontsize=15, fontweight='bold')
-    ax.set_xticks(range(20))
+    ax.set_xticks(range(40))
     ax.grid(axis='y', alpha=0.3, linestyle='--')
 
     # Highlight top-3 most frequent actions
@@ -288,7 +288,7 @@ def plot_action_distribution(action_history, save_dir, scenario_name):
     ax1.set_title('Power Level Distribution', fontsize=14, fontweight='bold')
 
     # Clustering strategies
-    colors_cluster = ['#FF69B4', '#9370DB', '#20B2AA', '#FF8C00']
+    colors_cluster = ['#FF69B4', '#9370DB', '#20B2AA', '#FF8C00', '#DDA0DD', '#CD5C5C', '#F0E68C', '#87CEEB']
     wedges2, texts2, autotexts2 = ax2.pie(
         cluster_distribution,
         labels=CLUSTERING_STRATEGIES,
@@ -308,13 +308,13 @@ def plot_action_distribution(action_history, save_dir, scenario_name):
     plt.close()
 
     # 3. Heatmap: Power x Clustering (2D grid)
-    fig3, ax = plt.subplots(figsize=(10, 8))
+    fig3, ax = plt.subplots(figsize=(12, 8))
 
-    # Create 2D matrix (5 power levels x 4 clustering strategies)
-    action_matrix = np.zeros((5, 4))
+    # Create 2D matrix (5 power levels x 8 clustering strategies)
+    action_matrix = np.zeros((5, 8))
     for action_id in action_history:
-        power_idx = action_id // 4
-        cluster_idx = action_id % 4
+        power_idx = action_id // 8
+        cluster_idx = action_id % 8
         action_matrix[power_idx, cluster_idx] += 1
 
     # Normalize to percentages
@@ -323,9 +323,9 @@ def plot_action_distribution(action_history, save_dir, scenario_name):
     im = ax.imshow(action_matrix_pct, cmap='YlOrRd', aspect='auto')
 
     # Set ticks and labels
-    ax.set_xticks(np.arange(4))
+    ax.set_xticks(np.arange(8))
     ax.set_yticks(np.arange(5))
-    ax.set_xticklabels(CLUSTERING_STRATEGIES, fontsize=11)
+    ax.set_xticklabels(CLUSTERING_STRATEGIES, fontsize=11, rotation=45, ha='right')
     ax.set_yticklabels(POWER_LEVELS, fontsize=11)
 
     ax.set_xlabel('Clustering Strategy', fontsize=13, fontweight='bold')
@@ -338,9 +338,9 @@ def plot_action_distribution(action_history, save_dir, scenario_name):
 
     # Annotate cells with percentages
     for i in range(5):
-        for j in range(4):
+        for j in range(8):
             text = ax.text(j, i, f'{action_matrix_pct[i, j]:.1f}%',
-                          ha='center', va='center', color='black', fontsize=10, fontweight='bold')
+                          ha='center', va='center', color='black', fontsize=9, fontweight='bold')
 
     plt.tight_layout()
     plot3_path = os.path.join(save_dir, 'action_heatmap_2d.png')
@@ -471,7 +471,7 @@ def export_results_json(action_counts, power_dist, cluster_dist, qos_stats, scen
         'clustering_distribution': {
             CLUSTERING_STRATEGIES[i]: {'count': int(cluster_dist[i]),
                                        'percentage': float(cluster_dist[i] / sum(cluster_dist) * 100)}
-            for i in range(4)
+            for i in range(8)
         },
         'qos_performance': qos_stats
     }

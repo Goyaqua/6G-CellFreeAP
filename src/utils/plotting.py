@@ -143,17 +143,7 @@ def plot_channel_gains(network, save_path: str = None):
     channel_matrix = network.generate_channel_matrix(batch_size=1)
     
     # Get channel gains (magnitude)
-    channel_gain = np.abs(channel_matrix[0].numpy())  # (num_users, num_tx)
-    
-    # Average over antennas to get per-AP gains
-    channel_gain_per_ap = np.zeros((network.num_users, network.num_aps))
-    for ap_idx in range(network.num_aps):
-        ant_start = ap_idx * network.num_antennas_per_ap
-        ant_end = (ap_idx + 1) * network.num_antennas_per_ap
-        channel_gain_per_ap[:, ap_idx] = np.mean(
-            channel_gain[:, ant_start:ant_end],
-            axis=1
-        )
+    channel_gain_per_ap = network.get_channel_gain_per_ap(channel_matrix).T
     
     # Plot heatmap
     plt.figure(figsize=(10, 8))

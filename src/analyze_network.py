@@ -328,7 +328,7 @@ def safe_evaluate_rl_agent(agent, env, n_episodes=20, max_steps=100):
     return results
 
 
-def evaluate_baselines(network, n_episodes=20):
+def evaluate_baselines(env, n_episodes=20):
     """Evaluate baseline strategies"""
     strategies = {
         'Nearest AP': BaselineStrategies.nearest_ap_max_power,
@@ -337,6 +337,8 @@ def evaluate_baselines(network, n_episodes=20):
     }
 
     results = {}
+    network = env.network
+    target_qos_bps = env.qos_min_rate
 
     for strategy_name, strategy_func in strategies.items():
         print(f"\nEvaluating baseline: {strategy_name}...")
@@ -359,14 +361,14 @@ def evaluate_baselines(network, n_episodes=20):
                 channel_matrix, power_allocation, ap_association
             )
             ee = network.calculate_energy_efficiency(rates, power_allocation, ap_association)
-            qos_requirements = np.ones(network.num_users) * 5e6
+            qos_requirements = np.ones(network.num_users) * target_qos_bps
             qos_sat = network.calculate_qos_satisfaction(rates, qos_requirements)
 
             # Store
             all_ee.append(ee.numpy()[0])
             all_qos.append(qos_sat.numpy()[0])
             all_rates.append(np.mean(rates.numpy()) / 1e6)
-            all_sinr.append(10 * np.log10(np.mean(sinr.numpy())))
+            all_sinr.append(10 * np.log10(max(np.mean(sinr.numpy()), 1e-12)))
             all_active_aps.append(np.sum(np.sum(ap_association, axis=1) > 0))
 
         results[strategy_name] = {
@@ -521,7 +523,7 @@ def evaluate_network(args):
 
     # 4. Evaluate and compare with baselines
     print("\n📊 Evaluating Baselines...")
-    baseline_results = evaluate_baselines(env.network, n_episodes=args.episodes)
+    baseline_results = evaluate_baselines(env, n_episodes=args.episodes)
 
     for name, res in baseline_results.items():
         print(f"\n  {name}:")
