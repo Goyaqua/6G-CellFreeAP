@@ -20,11 +20,11 @@ network:
 environment:
   qos_min_rate_mbps: 5.0
 
-  # ⚖️ BALANCED WEIGHTS (1.3:1 ratio - rate slightly ahead for baseline-beating)
-  rate_weight: 0.05                # log_sum_rate (~63) × 0.05 ≈ 3.2 points
-  power_penalty_weight: 5.0        # normalized_power (~0.5) × 5.0 ≈ 2.5 points (Ratio 1.3:1)
-  qos_weight: 5.0                  # QoS penalty (Mbps violations)
-  fairness_weight: 0.0             # No fairness constraint (16 users)
+  # ⚖️ OPTUNA OPTIMIZED WEIGHTS (127.13 Mbits/Joule)
+  rate_weight: 3.9344              # Alpha: Modest Rate Weight
+  power_penalty_weight: 5.8301     # Beta: Strict Power Cost
+  qos_weight: 42.0541              # Gamma: QoS Penalty
+  fairness_weight: 0.0795          # Delta: High Fairness priority
 
   episode_length: 50
   action_type: 'discrete'

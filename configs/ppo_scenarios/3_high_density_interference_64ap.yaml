@@ -20,11 +20,11 @@ network:
 environment:
   qos_min_rate_mbps: 5.0
 
-  # 📶 RATE-DOMINANT WITH FAIRNESS (1.6:1 ratio - rate leads, fairness guards)
-  rate_weight: 0.03                # log_sum_rate (~110) × 0.03 ≈ 3.3 points
-  power_penalty_weight: 4.0        # normalized_power (~0.5) × 4.0 ≈ 2.0 points (Ratio 1.6:1)
-  qos_weight: 3.0                  # Moderate QoS (scaled down for 32 users)
-  fairness_weight: 3.0             # Fairness important but not overwhelming
+  # 📶 OPTUNA OPTIMIZED WEIGHTS
+  rate_weight: 1.2052              # Alpha: Modest Rate Weight
+  power_penalty_weight: 28.5885    # Beta: Extreme Power Penalty (Interference Mgmt)
+  qos_weight: 18.5892              # Gamma: High QoS Penalty
+  fairness_weight: 4.9832          # Delta: Moderate Fairness priority
 
   episode_length: 50
   action_type: 'discrete'

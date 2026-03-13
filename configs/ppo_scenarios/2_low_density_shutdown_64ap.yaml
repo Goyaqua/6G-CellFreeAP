@@ -20,11 +20,11 @@ network:
 environment:
   qos_min_rate_mbps: 5.0
 
-  # 🔋 POWER SAVING (1:1.5 ratio - mild power saving, still rate-competitive)
-  rate_weight: 0.05                # log_sum_rate (~33) × 0.05 ≈ 1.65 points
-  power_penalty_weight: 5.0        # normalized_power (~0.5) × 5.0 ≈ 2.5 points (Ratio 1:1.5)
-  qos_weight: 3.0                  # Relaxed QoS (8 users = less congestion)
-  fairness_weight: 0.0             # No fairness needed (few users)
+  # 🔋 OPTUNA OPTIMIZED WEIGHTS (216.66 Mbits/Joule)
+  rate_weight: 1.3312              # Alpha: Modest Rate Weight
+  power_penalty_weight: 2.0983     # Beta: Strict Power Cost (Shutdown Focus)
+  qos_weight: 5.8336               # Gamma: Measured QoS Penalty
+  fairness_weight: 0.4794          # Delta: Low Fairness priority (few users)
 
   episode_length: 50
   action_type: 'discrete'

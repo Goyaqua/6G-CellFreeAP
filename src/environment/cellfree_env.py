@@ -365,10 +365,15 @@ class CellFreeEnv(gym.Env):
 
         ap_association = np.zeros((self.num_aps, self.num_users))
 
-        if strategy_idx == 0:  # Nearest-only
+        if strategy_idx == 0:  # Ultra-Green (Minimum possible APs)
+            # Find the absolute strongest AP for each user
+            best_aps_per_user = np.argmax(channel_gain_per_ap, axis=0)
+            
+            # UNIQUE APs only! If 3 users have the same best AP, we only turn on 1 AP!
+            unique_best_aps = np.unique(best_aps_per_user)
+            
             for user_idx in range(self.num_users):
-                nearest_ap = np.argmax(channel_gain_per_ap[:, user_idx])
-                ap_association[nearest_ap, user_idx] = 1
+                ap_association[best_aps_per_user[user_idx], user_idx] = 1
 
         elif strategy_idx == 1:  # Top-2
             num_serving = min(2, self.num_aps)
